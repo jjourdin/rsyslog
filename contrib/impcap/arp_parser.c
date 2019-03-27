@@ -26,7 +26,7 @@
  * limitations under the License.
  */
 
-#include "impcap/parser.h"
+#include "parser.h"
 
 struct arp_header_s {
 	uint16_t hwType;
