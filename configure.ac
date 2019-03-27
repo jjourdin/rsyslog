@@ -2444,8 +2444,8 @@ AC_CONFIG_FILES([Makefile \
 		contrib/omtcl/Makefile \
 		contrib/omfile-hardened/Makefile \
 		contrib/mmkubernetes/Makefile \
-		plugins/impcap/Makefile \
-		plugins/mmcapture/Makefile \
+		contrib/impcap/Makefile \
+		contrib/mmcapture/Makefile \
 		contrib/improg/Makefile \
 		tests/Makefile])
 AC_OUTPUT

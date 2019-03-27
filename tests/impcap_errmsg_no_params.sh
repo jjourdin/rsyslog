@@ -3,7 +3,7 @@
 . ${srcdir:=.}/diag.sh init
 generate_conf
 add_conf '
-module(load="../plugins/impcap/.libs/impcap")
+module(load="../contrib/impcap/.libs/impcap")
 input(type="impcap")
 action(type="omfile" file="'$RSYSLOG_OUT_LOG'")
 '

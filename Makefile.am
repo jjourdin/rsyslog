@@ -298,12 +298,12 @@ endif
 
 # impcap
 if ENABLE_IMPCAP
-SUBDIRS += plugins/impcap
+SUBDIRS += contrib/impcap
 endif
 
 # mmcapture
 if ENABLE_MMCAPTURE
-SUBDIRS += plugins/mmcapture
+SUBDIRS += contrib/mmcapture
 endif
 
 # improg
