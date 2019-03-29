@@ -26,6 +26,7 @@
  * limitations under the License.
  */
 
+#include "config.h"
 #include "parsers.h"
 
 struct ipv4_header_s {

@@ -26,6 +26,7 @@
  * limitations under the License.
  */
 
+#include "config.h"
 #include "parsers.h"
 
 #pragma GCC diagnostic push
