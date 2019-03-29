@@ -296,6 +296,7 @@ if ENABLE_MMKUBERNETES
 SUBDIRS += contrib/mmkubernetes
 endif
 
+<<<<<<< HEAD
 # impcap
 if ENABLE_IMPCAP
 SUBDIRS += contrib/impcap
@@ -304,6 +305,10 @@ endif
 # mmcapture
 if ENABLE_MMCAPTURE
 SUBDIRS += contrib/mmcapture
+
+# imtuxedoulog
+if ENABLE_IMTUXEDOULOG
+SUBDIRS += contrib/imtuxedoulog
 endif
 
 # improg

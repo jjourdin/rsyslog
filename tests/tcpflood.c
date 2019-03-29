@@ -1,6 +1,10 @@
 /* Opens a large number of tcp connections and sends
  * messages over them. This is used for stress-testing.
  *
+ * NOTE: the following part is actually the SPEC (or call it man page).
+ * It's not random comments. So if the code behavior does not match what
+ * is written here, it should be considered a bug.
+ *
  * Params
  * -t	target address (default 127.0.0.1)
  * -p	target port(s) (default 13514), multiple via port1:port2:port3...
@@ -67,7 +71,7 @@
  *
  * Part of the testbench for rsyslog.
  *
- * Copyright 2009-2016 Rainer Gerhards and Adiscon GmbH.
+ * Copyright 2009-2019 Rainer Gerhards and Adiscon GmbH.
  *
  * This file is part of rsyslog.
  *
@@ -159,6 +163,7 @@ char *test_rs_strerror_r(int errnum, char *buf, size_t buflen) {
 
 #define MAX_EXTRADATA_LEN 200*1024
 #define MAX_SENDBUF 2 * MAX_EXTRADATA_LEN
+#define MAX_RCVBUF 16 * 1024 + 1/* TLS RFC 8449: max size of buffer for message reception */
 
 static char *targetIP = "127.0.0.1";
 static char *msgPRI = "167";
@@ -504,8 +509,9 @@ void closeConnections(void)
 				ling.l_onoff = 1;
 				ling.l_linger = 1;
 				setsockopt(sockArray[i], SOL_SOCKET, SO_LINGER, &ling, sizeof(ling));
-				if(transport == TP_TLS)
+				if(transport == TP_TLS) {
 					closeTLSSess(i);
+				}
 				close(sockArray[i]);
 			}
 		}
@@ -1299,6 +1305,14 @@ closeTLSSess(int i)
 {
 	int r;
 	r = SSL_shutdown(sslArray[i]);
+	if (r <= 0){
+		/* Shutdown not finished, call SSL_read to do a bidirectional shutdown, see doc for more:
+		*	https://www.openssl.org/docs/man1.1.1/man3/SSL_shutdown.html
+		*/
+		char rcvBuf[MAX_RCVBUF];
+		SSL_read(sslArray[i], rcvBuf, MAX_RCVBUF);
+
+	}
 	SSL_free(sslArray[i]);
 }
 #	elif defined(ENABLE_GNUTLS)
@@ -1634,9 +1648,11 @@ int main(int argc, char *argv[])
 		if(setrlimit(RLIMIT_NOFILE, &maxFiles) < 0) {
 			perror("setrlimit to increase file handles failed");
 			fprintf(stderr,
-			        "could net set sufficiently large number of "
+			        "could not set sufficiently large number of "
 			        "open files for required connection count!\n");
-			exit(1);
+			if(!softLimitConnections) {
+				exit(1);
+			}
 		}
 	}
 
