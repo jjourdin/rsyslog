@@ -8,3 +8,8 @@ mmcapture_la_SOURCES += file_utils.c
 mmcapture_la_SOURCES += packets.c
 mmcapture_la_SOURCES += tcp_sessions.c
 mmcapture_la_SOURCES += smb_sessions.c
+
+EXTRA_DIST=file_utils.h \
+	packets.h \
+	smb_sessions.h \
+	tcp_sessions.h
