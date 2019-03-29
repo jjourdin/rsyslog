@@ -53,7 +53,7 @@
 #include "rsconf.h"
 #include "glbl.h"
 
-#include "parser.h"
+#include "parsers.h"
 
 
 MODULE_TYPE_INPUT
