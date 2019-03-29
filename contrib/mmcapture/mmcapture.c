@@ -225,12 +225,11 @@ ENDnewActInst
  *  The length of this array is always half the length given in parameter
 */
 uchar *hexToData(char *hex, uint32_t length) {
-	unsigned char *retBuf = NULL;
 	uint32_t i;
 	DBGPRINTF("hexToData\n");
 	DBGPRINTF("length %d\n", length);
 
-	retBuf = malloc((length / 2) * sizeof(uchar));
+	unsigned char *retBuf = malloc((length / 2) * sizeof(uchar));
 	assert(retBuf != NULL);
 
 	for (i = 0; i < length; ++i) {

@@ -53,10 +53,9 @@ tcp_session_list* initTcp(void){
 tcp_session_list* destroyTcp(void){
 	DBGPRINTF("initializing TCP sessions list\n");
 
-	tcp_session *session = NULL;
+	tcp_session *session = sessions->tail;
 	tcp_session *next_session = NULL;
 
-	session = sessions->tail;
 	while( session != NULL ) {
 		/* Backup next session in the chained list */
 		next_session = session->prevSession;
@@ -235,7 +234,6 @@ void freeSession(tcp_session *session) {
 		if(session->sCon != NULL)
 			free(session->sCon);
 		free(session);
-		session = NULL;
 	}
 }
 

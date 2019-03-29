@@ -74,7 +74,6 @@ void addDataToFile(char* pData, uint32_t sizeData, uint32_t offSet, FILE* file){
  *  There is no error code returned, but simply a debug message
 */
 FILE* openFile(const char* path, const char* file_name){
-	DIR *dir = NULL;
 	FILE *file = NULL;
 	char *new_file_comp_path = NULL;
 
@@ -83,7 +82,7 @@ FILE* openFile(const char* path, const char* file_name){
 
 	DBGPRINTF("opening file %s in folder %s", file_name, path);
 
-	dir = opendir(path);
+	DIR *dir = opendir(path);
 	if(dir != NULL){
 		new_file_comp_path = malloc(strlen(path)+1+strlen(file_name)+1);
 		strcpy(new_file_comp_path,path);
