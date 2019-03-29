@@ -3,7 +3,7 @@
 . ${srcdir:=.}/diag.sh init
 generate_conf
 add_conf '
-module(load="../plugins/mmcapture/.libs/mmcapture")
+module(load="../contrib/mmcapture/.libs/mmcapture")
 action(type="mmcapture")
 action(type="omfile" file="'$RSYSLOG_OUT_LOG'")
 '
