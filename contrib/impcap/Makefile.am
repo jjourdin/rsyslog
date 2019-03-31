@@ -17,4 +17,6 @@ impcap_la_SOURCES += dns_parser.c
 impcap_la_SOURCES += tcp_parser.c
 impcap_la_SOURCES += smb_parser.c
 impcap_la_SOURCES += ftp_parser.c
+
+EXTRA_DIST=parsers.h
 impcap_la_SOURCES += http_parser.c

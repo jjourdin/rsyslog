@@ -26,6 +26,7 @@
  * limitations under the License.
  */
 
+#include "config.h"
 #include "parsers.h"
 
 #define DNS_PORT 53

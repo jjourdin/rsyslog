@@ -26,6 +26,7 @@
  * limitations under the License.
  */
 
+#include "config.h"
 #include "parsers.h"
 
 struct arp_header_s {
