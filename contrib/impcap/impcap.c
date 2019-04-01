@@ -174,7 +174,7 @@ createInstance(instanceConf_t **pinst) {
 	}
 
 	*pinst = inst;
-	finalize_it:
+finalize_it:
 	RETiRet;
 }
 
@@ -465,7 +465,13 @@ finalize_it:
 	ENDactivateCnf
 
 BEGINfreeCnf
+	instanceConf_t *inst, *del;
 CODESTARTfreeCnf
+	for(inst = loadModConf->root ; inst != NULL ; ) {
+		del = inst;
+		inst = inst->next;
+		free(del);
+	}
 ENDfreeCnf
 
 /* runtime functions */
