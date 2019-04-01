@@ -252,6 +252,11 @@ CODESTARTsetModCnf
 	init_eth_proto_handlers();
 
 	pvals = nvlstGetParams(lst, &modpblk, NULL);
+	if(pvals == NULL) {
+		LogError(0, RS_RET_MISSING_CNFPARAMS, "mmdblookup: error processing module "
+				 "config parameters missing [module(...)]");
+		ABORT_FINALIZE(RS_RET_MISSING_CNFPARAMS);
+	}
 
 	for(i = 0 ; i<modpblk.nParams ; ++i) {
 		if(!pvals[i].bUsed)
@@ -266,6 +271,9 @@ CODESTARTsetModCnf
 			dbgprintf("impcap: non-handled param %s in beginSetModCnf\n", modpblk.descr[i].name);
 		}
 	}
+finalize_it:
+	if(pvals != NULL)
+		cnfparamvalsDestruct(pvals, &modpblk);
 ENDsetModCnf
 
 /* config v2 system */
