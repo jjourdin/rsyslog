@@ -1609,6 +1609,18 @@ AC_ARG_ENABLE(helgrind,
 )
 AM_CONDITIONAL(ENABLE_HELGRIND, test x$enable_helgrind = xyes)
 
+# settings for the batch report input module
+AC_ARG_ENABLE(imbatchreport,
+        [AS_HELP_STRING([--enable-imbatchreport],[batch report input module enabled @<:@default=no@:>@])],
+        [case "${enableval}" in
+         yes) enable_imbatchreport="yes" ;;
+          no) enable_imbatchreport="no" ;;
+           *) AC_MSG_ERROR(bad value ${enableval} for --enable-imbatchreport) ;;
+         esac],
+        [enable_imbatchreport=no]
+)
+AM_CONDITIONAL(ENABLE_IMBATCHREPORT, test x$enable_imbatchreport = xyes)
+
 # settings for the file input module
 AC_ARG_ENABLE(imfile,
         [AS_HELP_STRING([--enable-imfile],[file input module enabled @<:@default=no@:>@])],
@@ -2289,6 +2301,20 @@ AM_CONDITIONAL(ENABLE_MMKUBERNETES, test x$enable_mmkubernetes = xyes)
 
 # END Kubernetes metadata support
 
+
+# mmtaghostname
+AC_ARG_ENABLE(mmtaghostname,
+        [AS_HELP_STRING([--enable-mmtaghostname],[Enable Tag and Hostname messages' modifier @<:@default=no@:>@])],
+        [case "${enableval}" in
+         yes) enable_mmtaghostname="yes" ;;
+          no) enable_mmtaghostname="no" ;;
+           *) AC_MSG_ERROR(bad value ${enableval} for --enable-mmtaghostname) ;;
+         esac],
+        [enable_mmtaghostname=no]
+)
+AM_CONDITIONAL(ENABLE_MMTAGHOSTNAME, test x$enable_mmtaghostname = xyes)
+#END mmtaghostname
+
 # man pages
 have_to_generate_man_pages="no"
 git_src_have_to_generate_man_pages="yes" # default to use when building from git source
@@ -2440,11 +2466,13 @@ AC_CONFIG_FILES([Makefile \
 		contrib/omhttpfs/Makefile \
 		contrib/omamqp1/Makefile \
 		contrib/omtcl/Makefile \
+		contrib/imbatchreport/Makefile \
 		contrib/omfile-hardened/Makefile \
 		contrib/mmkubernetes/Makefile \
 		contrib/impcap/Makefile \
 		contrib/imtuxedoulog/Makefile \
 		contrib/improg/Makefile \
+		contrib/mmtaghostname/Makefile \
 		tests/Makefile])
 AC_OUTPUT
 
@@ -2480,6 +2508,7 @@ echo "    Solaris input module enabled:             $enable_imsolaris"
 echo "    periodic statistics module enabled:       $enable_impstats"
 echo "    imczmq input module enabled:              $enable_imczmq"
 echo "    imjournal input module enabled:           $enable_imjournal"
+echo "    imbatchreport input module enabled:       $enable_imbatchreport"
 echo "    imkafka module will be compiled:          $enable_imkafka"
 echo "    impcap input module enabled:              $enable_impcap"
 echo "    imtuxedoulog module will be compiled:     $enable_imtuxedoulog"
@@ -2529,6 +2558,7 @@ echo "    mmdblookup enabled:                       $enable_mmdblookup"
 echo "    mmfields enabled:                         $enable_mmfields"
 echo "    mmrm1stspace module enabled:              $enable_mmrm1stspace"
 echo "    mmkubernetes enabled:                     $enable_mmkubernetes"
+echo "    mmtaghostname enabled:                    $enable_mmtaghostname"
 echo
 echo "---{ database support }---"
 echo "    MySql support enabled:                    $enable_mysql"

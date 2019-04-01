@@ -286,6 +286,11 @@ if ENABLE_OMAMQP1
 SUBDIRS += contrib/omamqp1
 endif
 
+# imbatchreport
+if ENABLE_IMBATCHREPORT
+SUBDIRS += contrib/imbatchreport
+endif
+
 # omtcl
 if ENABLE_OMTCL
 SUBDIRS += contrib/omtcl
@@ -309,6 +314,11 @@ endif
 # improg
 if ENABLE_IMPROG
 SUBDIRS += contrib/improg
+endif
+
+# mmtaghostname
+if ENABLE_MMTAGHOSTNAME
+SUBDIRS += contrib/mmtaghostname
 endif
 
 # tests are added as last element, because tests may need different
