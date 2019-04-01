@@ -253,7 +253,7 @@ CODESTARTsetModCnf
 
 	pvals = nvlstGetParams(lst, &modpblk, NULL);
 	if(pvals == NULL) {
-		LogError(0, RS_RET_MISSING_CNFPARAMS, "mmdblookup: error processing module "
+		LogError(0, RS_RET_MISSING_CNFPARAMS, "impcap: error processing module "
 				 "config parameters missing [module(...)]");
 		ABORT_FINALIZE(RS_RET_MISSING_CNFPARAMS);
 	}
