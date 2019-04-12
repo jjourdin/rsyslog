@@ -695,10 +695,15 @@ endif #if ENABLE_JOURNAL_TESTS
 
 if ENABLE_IMPROG
 TESTS +=  \
-	improg_errmsg_no_params.sh
+	improg_errmsg_no_params.sh \
+	improg_prog_simple.sh \
+	improg_prog_confirm.sh \
+	improg_prog_confirm_killonclose.sh \
+	improg_prog_killonclose.sh
 if HAVE_VALGRIND
 TESTS +=  \
-	improg_errmsg_no_params-vg.sh
+	improg_errmsg_no_params-vg.sh \
+	improg_prog_simple-vg.sh
 endif # ENABLE_IMPROG
 endif
 
@@ -811,7 +816,6 @@ endif
 if ENABLE_IMDOCKER
 if ENABLE_IMDOCKER_TESTS
 TESTS += \
-	imdocker-unittests.sh \
 	imdocker-basic.sh \
 	imdocker-long-logline.sh \
 	imdocker-new-logs-from-start.sh \
@@ -825,6 +829,35 @@ TESTS +=  \
 endif # HAVE_VALGRIND
 endif # ENABLE_IMDOCKER_TESTS
 endif # ENABLE_IMDOCKER
+
+if ENABLE_OMRABBITMQ
+check_PROGRAMS += miniamqpsrvr
+miniamqpsrvr_SOURCES = miniamqpsrvr.c
+miniamqpsrvr_CPPFLAGS = $(PTHREADS_CFLAGS) $(RABBITMQ_CFLAGS) $(RSRT_CFLAGS)
+miniamqpsrvr_LDADD = $(SOL_LIBS) $(PTHREADS_LIBS)
+
+TESTS +=  \
+	omrabbitmq_no_params.sh \
+	omrabbitmq_params_missing0.sh \
+	omrabbitmq_params_missing1.sh \
+	omrabbitmq_params_missing2.sh \
+	omrabbitmq_params_invalid0.sh \
+	omrabbitmq_params_invalid1.sh \
+	omrabbitmq_params_invalid2.sh \
+	omrabbitmq_params_invalid3.sh \
+	omrabbitmq_data_1server.sh \
+	omrabbitmq_data_2servers.sh \
+	omrabbitmq_error_server0.sh \
+	omrabbitmq_error_server1.sh \
+	omrabbitmq_error_server2.sh \
+	omrabbitmq_error_server3.sh \
+	omrabbitmq_json.sh \
+	omrabbitmq_raw.sh
+if HAVE_VALGRIND
+TESTS += \
+	omrabbitmq_data_1server-vg.sh
+endif # HAVE_VALGRIND
+endif # ENABLE_OMRABBITMQ
 
 if ENABLE_IMPSTATS
 TESTS +=  \
@@ -919,10 +952,19 @@ endif
 if ENABLE_PMNORMALIZE
 TESTS +=  \
 	pmnormalize-basic.sh \
-	pmnormalize-rule.sh
+	pmnormalize-invld-rulebase.sh \
+	pmnormalize-rule.sh \
+	pmnormalize-rule_and_rulebase.sh \
+	pmnormalize-neither_rule_rulebase.sh \
+	pmnormalize-rule_invld-data.sh
 if HAVE_VALGRIND
 TESTS += \
-	pmnormalize-rule-vg.sh
+	pmnormalize-basic-vg.sh \
+	pmnormalize-invld-rulebase-vg.sh \
+	pmnormalize-rule-vg.sh \
+	pmnormalize-rule_and_rulebase-vg.sh \
+	pmnormalize-neither_rule_rulebase-vg.sh \
+	pmnormalize-rule_invld-data-vg.sh
 endif
 endif
 
@@ -930,7 +972,13 @@ if ENABLE_MMNORMALIZE
 TESTS += msgvar-concurrency-array.sh \
 	msgvar-concurrency-array-event.tags.sh \
 	mmnormalize_rule_from_string.sh \
-	mmnormalize_rule_from_array.sh
+	mmnormalize_rule_from_array.sh \
+	mmnormalize_parsesuccess.sh
+
+if HAVE_VALGRIND
+TESTS += \
+	mmnormalize_parsesuccess-vg.sh
+endif
 
 if ENABLE_IMPTCP
 TESTS +=  \
@@ -944,7 +992,7 @@ if LOGNORM_REGEX_SUPPORTED
 TESTS += \
 	mmnormalize_regex.sh
 endif
-endif
+endif # ENABLE_MMNORMALIZE
 
 if ENABLE_MMJSONPARSE
 TESTS += \
@@ -1036,6 +1084,7 @@ TESTS +=  \
 	sndrcv_tls_ossl_servercert_ossl_clientanon.sh \
 	sndrcv_tls_ossl_certvalid.sh \
 	sndrcv_tls_ossl_certvalid_expired.sh \
+	sndrcv_tls_ossl_certvalid_tlscommand.sh \
 	imtcp-tls-ossl-x509valid.sh \
 	imtcp-tls-ossl-x509name.sh \
 	imtcp-tls-ossl-x509fingerprint.sh \
@@ -1136,6 +1185,11 @@ if ENABLE_OMRULESET
 TESTS += \
 	omruleset.sh \
 	omruleset-queue.sh
+endif
+
+if ENABLE_PMDB2DIAG
+TESTS += \
+	pmdb2diag_parse.sh
 endif
 
 if ENABLE_PMSNARE
@@ -1290,10 +1344,12 @@ if ENABLE_MMKUBERNETES
 if ENABLE_MMJSONPARSE
 if ENABLE_IMFILE
 TESTS += \
-	mmkubernetes-basic.sh
+	mmkubernetes-basic.sh \
+	mmkubernetes-cache-expire.sh
 if HAVE_VALGRIND
 TESTS += \
-	mmkubernetes-basic-vg.sh
+	mmkubernetes-basic-vg.sh \
+	mmkubernetes-cache-expire-vg.sh
 endif
 endif
 endif
@@ -1516,6 +1572,23 @@ EXTRA_DIST= \
 	omfile-whitespace-filename.sh \
 	omfile-read-only.sh \
 	omfile_both_files_set.sh \
+	omrabbitmq_no_params.sh \
+	omrabbitmq_params_missing0.sh \
+	omrabbitmq_params_missing1.sh \
+	omrabbitmq_params_missing2.sh \
+	omrabbitmq_params_invalid0.sh \
+	omrabbitmq_params_invalid1.sh \
+	omrabbitmq_params_invalid2.sh \
+	omrabbitmq_params_invalid3.sh \
+	omrabbitmq_data_1server.sh \
+	omrabbitmq_data_1server-vg.sh \
+	omrabbitmq_data_2servers.sh \
+	omrabbitmq_error_server0.sh \
+	omrabbitmq_error_server1.sh \
+	omrabbitmq_error_server2.sh \
+	omrabbitmq_error_server3.sh \
+	omrabbitmq_json.sh \
+	omrabbitmq_raw.sh \
 	msgvar-concurrency.sh \
 	msgvar-concurrency-array.sh \
 	testsuites/msgvar-concurrency-array.rulebase \
@@ -1584,6 +1657,8 @@ EXTRA_DIST= \
 	timereported-utc-legacy.sh \
 	timereported-utc-vg.sh \
 	mmrm1stspace-basic.sh \
+	mmnormalize_parsesuccess.sh \
+	mmnormalize_parsesuccess-vg.sh \
 	mmnormalize_rule_from_string.sh \
 	mmnormalize_rule_from_array.sh \
 	pmnull-basic.sh \
@@ -1594,10 +1669,19 @@ EXTRA_DIST= \
 	mmnormalize_processing_test2.sh \
 	mmnormalize_processing_test3.sh \
 	mmnormalize_processing_test4.sh \
-	pmnormalize-rule.sh \
-	pmnormalize-rule-vg.sh\
-	testsuites/pmnormalize_basic.rulebase \
 	pmnormalize-basic.sh \
+	pmnormalize-rule.sh \
+	pmnormalize-rule_and_rulebase.sh \
+	pmnormalize-neither_rule_rulebase.sh \
+	pmnormalize-invld-rulebase.sh \
+	pmnormalize-rule_invld-data.sh \
+	testsuites/pmnormalize_basic.rulebase \
+	pmnormalize-basic-vg.sh \
+	pmnormalize-rule-vg.sh\
+	pmnormalize-rule_and_rulebase-vg.sh \
+	pmnormalize-neither_rule_rulebase-vg.sh \
+	pmnormalize-invld-rulebase-vg.sh \
+	pmnormalize-rule_invld-data-vg.sh \
 	rawmsg-after-pri.sh \
 	rs_optimizer_pri.sh \
 	rscript_prifilt.sh \
@@ -1701,6 +1785,7 @@ EXTRA_DIST= \
 	sndrcv_tls_ossl_anon_rebind.sh \
 	sndrcv_tls_ossl_certvalid.sh \
 	sndrcv_tls_ossl_certvalid_expired.sh \
+	sndrcv_tls_ossl_certvalid_tlscommand.sh \
 	imtcp-tls-ossl-x509valid.sh \
 	imtcp-tls-ossl-x509name.sh \
 	imtcp-tls-ossl-x509fingerprint.sh \
@@ -1794,7 +1879,7 @@ EXTRA_DIST= \
 	sndrcv_relp_rebind.sh \
 	sndrcv_relp_tls_prio.sh \
 	sndrcv_relp_tls.sh \
-        sndrcv_relp_tls_certvalid.sh \
+	sndrcv_relp_tls_certvalid.sh \
 	relp_tls_certificate_not_found.sh \
 	omrelp_wrong_authmode.sh \
 	imrelp-tls.sh \
@@ -1810,10 +1895,34 @@ EXTRA_DIST= \
 	action-tx-errfile.sh \
 	testsuites/action-tx-errfile.result \
 	pipeaction.sh \
+	improg-simul.sh \
 	improg_errmsg_no_params.sh \
 	improg_errmsg_no_params-vg.sh \
 	impcap_errmsg_no_params.sh \
 	impcap_errmsg_no_params-vg.sh \
+	improg_prog_simple.sh \
+	improg_prog_confirm.sh \
+	improg_prog_confirm_killonclose.sh \
+	improg_prog_killonclose.sh \
+	improg_prog_simple-vg.sh \
+	omhttp-auth.sh \
+	omhttp-basic.sh \
+	omhttp-batch-fail-with-400.sh \
+	omhttp-batch-jsonarray-compress.sh \
+	omhttp-batch-jsonarray-retry.sh \
+	omhttp-batch-jsonarray.sh \
+	omhttp-batch-kafkarest-retry.sh \
+	omhttp-batch-kafkarest.sh \
+	omhttp-batch-newline.sh \
+	omhttp-retry.sh \
+	omhttp-auth-vg.sh \
+	omhttp-basic-vg.sh \
+	omhttp-batch-jsonarray-compress-vg.sh \
+	omhttp-batch-jsonarray-retry-vg.sh \
+	omhttp-batch-jsonarray-vg.sh \
+	omhttp-batch-kafkarest-retry-vg.sh \
+	omhttp-retry-vg.sh \
+	omhttp_server.py \
 	omprog-defaults.sh \
 	omprog-defaults-vg.sh \
 	omprog-output-capture.sh \
@@ -2204,8 +2313,9 @@ EXTRA_DIST= \
 	mmkubernetes-basic-vg.sh \
 	mmkubernetes_test_server.py \
 	mmkubernetes-basic.out.json \
+	mmkubernetes-cache-expire.sh \
+	mmkubernetes-cache-expire-vg.sh \
 	es-writeoperation.sh \
-	imdocker-unittests.sh \
 	imdocker-basic.sh \
 	imdocker-basic-vg.sh \
 	imdocker-long-logline.sh \
