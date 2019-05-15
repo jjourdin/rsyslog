@@ -35,10 +35,71 @@
 #include <json.h>
 
 #include "rsyslog.h"
+#include "extract_impcap.h"
 
-#define SMB_PORT1 139
-#define SMB_PORT2 445
-#define SMB_PORTS (SMB_PORT1 || SMB_PORT2)
+/* Address */
+typedef struct Address_ {
+    char family;
+    union {
+        uint32_t        address_un_data32[4]; /* type-specific field */
+        uint16_t        address_un_data16[8]; /* type-specific field */
+        uint8_t         address_un_data8[16]; /* type-specific field */
+    } address;
+} Address;
+
+#define addr_data32 address.address_un_data32
+#define addr_data16 address.address_un_data16
+#define addr_data8  address.address_un_data8
+#define addr_in6addr    address.address_un_in6
+
+#define COPY_ADDR(a, b) do {                    \
+        (b)->family = (a)->family;                 \
+        (b)->addr_data32[0] = (a)->addr_data32[0]; \
+        (b)->addr_data32[1] = (a)->addr_data32[1]; \
+        (b)->addr_data32[2] = (a)->addr_data32[2]; \
+        (b)->addr_data32[3] = (a)->addr_data32[3]; \
+    } while (0)
+
+/* clear the address structure by setting all fields to 0 */
+#define CLEAR_ADDR(a) do {       \
+        (a)->family = 0;         \
+        (a)->addr_data32[0] = 0; \
+        (a)->addr_data32[1] = 0; \
+        (a)->addr_data32[2] = 0; \
+        (a)->addr_data32[3] = 0; \
+    } while (0)
+
+#define CMP_ADDR(a1, a2) \
+    (((a1)->addr_data32[3] == (a2)->addr_data32[3] && \
+      (a1)->addr_data32[2] == (a2)->addr_data32[2] && \
+      (a1)->addr_data32[1] == (a2)->addr_data32[1] && \
+      (a1)->addr_data32[0] == (a2)->addr_data32[0]))
+
+/* Port is just a uint16_t */
+typedef uint16_t Port;
+
+typedef struct Packet_ {
+    Address src, dst;
+    Port sp, dp;
+    uint8_t proto;
+    uint16_t vlanId[2];
+    char *flags;
+
+    struct Flow_ *flow;
+    uint32_t flowHash;
+
+    struct IPV6Hdr_ *ipv6h;
+    struct IPV4Hdr_ *ipv4h;
+    struct TCPHdr_ *tcph;
+    struct SMBHdr_ *smbh;
+
+    uint8_t *payload;
+    uint16_t payloadLen;
+} Packet;
+
+
+// ##############################################
+
 
 typedef struct tcp_metadata_s{
   uint16_t srcPort;
@@ -76,6 +137,7 @@ typedef struct tcp_packet_s{
   app_header_metadata *appHeader;
 }tcp_packet;
 
+void printPacketInfo(Packet *);
 int getTCPMetadata(struct json_object *pJson, tcp_packet *pData);
 int getSMBMetadata(struct json_object *pJson, tcp_packet *pData);
 tcp_packet* createPacket();

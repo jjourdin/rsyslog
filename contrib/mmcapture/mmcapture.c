@@ -48,6 +48,7 @@
 
 #include "file_utils.h"
 #include "tcp_sessions.h"
+#include "packets.h"
 
 MODULE_TYPE_OUTPUT
 MODULE_TYPE_NOKEEP
@@ -210,7 +211,7 @@ char *hexToData(char *hex, uint32_t length) {
 
   for(i = 0; i < length; ++i) {
     if(i%2) {
-      retBuf[i/2] <<= 4;  /* bitwise left shift */
+      retBuf[i/2] <<= 4;
       if(hex[i] >= '0' && hex[i] <= '9') {
         retBuf[i/2] += hex[i] - '0';
       }
@@ -320,13 +321,20 @@ DBGPRINTF("entering doAction\n");
   smsg_t **ppMsg = (smsg_t **)pMsgData;
   smsg_t *pMsg = *ppMsg;
 CODESTARTdoAction
-  tcp_packet *pData = createPacket();
+  /* tcp_packet *pData = createPacket();
 
   if(getImpcapMetadata(pMsg, pData)){
     checkTcpSessions(pData);
   }
 
-  freePacket(pData);
+  freePacket(pData); */
+
+  Packet *pkt = getImpcapData(pMsg);
+  printPacketInfo(pkt);
+
+  if(pkt != NULL) {
+    free(pkt);
+  }
 ENDdoAction
 
 BEGINparseSelectorAct

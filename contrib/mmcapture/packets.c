@@ -29,6 +29,16 @@
 
 #include "packets.h"
 
+void printPacketInfo(Packet *pkt) {
+    DBGPRINTF("payloadLen: %d\n", pkt->payloadLen);
+    DBGPRINTF("src: %s\n", pkt->ipv4h->src);
+    DBGPRINTF("dst: %s\n", pkt->ipv4h->dst);
+    DBGPRINTF("ip proto: %d\n", pkt->ipv4h->proto);
+    DBGPRINTF("sport: %d\n", pkt->tcph->sport);
+    DBGPRINTF("dport: %d\n", pkt->tcph->dport);
+
+}
+
 /*
  *  This function recovers SMB fields from an impcap metadata json
  *
