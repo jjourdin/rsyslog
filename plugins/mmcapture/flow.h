@@ -38,19 +38,8 @@
         (a)->addr_data32[3] = 0; \
     } while (0)
 
-/* Port is just a uint16_t */
-typedef uint16_t Port;
-#define SET_PORT(v, p) ((p) = (v))
-#define COPY_PORT(a,b) ((b) = (a))
-
-/* Hash key for the flow hash */
-typedef struct FlowKey_
-{
-    Address src, dst;
-    Port sp, dp;
-    uint8_t proto;
-
-} FlowKey;
+/* FlowHash is just an uint32_t */
+typedef uint32_t FlowHash;
 
 typedef struct FlowAddress_ {
     union {
@@ -60,13 +49,38 @@ typedef struct FlowAddress_ {
     } address;
 } FlowAddress;
 
+/* Hash key for the flow hash */
+typedef struct FlowHashKey4_
+{
+    union {
+        struct {
+            uint32_t addrs[2];
+            uint16_t ports[2];
+            uint32_t proto;
+        };
+        const uint32_t u32[4];
+    };
+} FlowHashKey4;
+
+typedef struct FlowHashKey6_
+{
+    union {
+        struct {
+            uint32_t addrs[8];
+            uint16_t ports[2];
+            uint32_t proto;
+        };
+        const uint32_t u32[4];
+    };
+} FlowHashKey6;
+
 #define addr_data32 address.address_un_data32
 #define addr_data16 address.address_un_data16
 #define addr_data8  address.address_un_data8
 
 typedef struct Flow_ {
     FlowAddress src, dst;
-    Port sp, dp;
+    uint16_t sp, dp;
 
     uint8_t proto;
     uint16_t vlanId;

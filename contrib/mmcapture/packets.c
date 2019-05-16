@@ -30,201 +30,216 @@
 #include "packets.h"
 
 void printPacketInfo(Packet *pkt) {
+    DBGPRINTF("\n\n########## PACKET INFO ##########\n");
+
     DBGPRINTF("payloadLen: %d\n", pkt->payloadLen);
-    DBGPRINTF("src: %s\n", pkt->ipv4h->src);
-    DBGPRINTF("dst: %s\n", pkt->ipv4h->dst);
-    DBGPRINTF("ip proto: %d\n", pkt->ipv4h->proto);
-    DBGPRINTF("sport: %d\n", pkt->tcph->sport);
-    DBGPRINTF("dport: %d\n", pkt->tcph->dport);
+
+    int i;
+    char *payloadHex = malloc(pkt->payloadLen*2+1);
+    for(i = 0; i < pkt->payloadLen; i++) {
+        // #muchUgliness
+        snprintf(&payloadHex[2*i], 3, "%02X", pkt->payload[i]);
+    }
+    payloadHex[2*i] = 0;
+    DBGPRINTF("payload: %s\n", payloadHex);
+    free(payloadHex);
+
+    if(pkt->ipv4h) {
+        DBGPRINTF("ipv4h->src: %s\n", pkt->ipv4h->src);
+        DBGPRINTF("ipv4h->dst: %s\n", pkt->ipv4h->dst);
+        DBGPRINTF("ipv4h->hlen: %d\n", pkt->ipv4h->hLen);
+        DBGPRINTF("ipv4h->ttl: %d\n", pkt->ipv4h->ttl);
+        DBGPRINTF("ipv4h->proto: %d\n", pkt->ipv4h->proto);
+    }
+    if(pkt->ipv6h) {
+        DBGPRINTF("ipv6h->src: %s\n", pkt->ipv6h->src);
+        DBGPRINTF("ipv6h->dst: %s\n", pkt->ipv6h->dst);
+        DBGPRINTF("ipv6h->ttl: %d\n", pkt->ipv6h->ttl);
+    }
+
+    if(pkt->tcph) {
+        DBGPRINTF("tcph->sport: %d\n", pkt->tcph->sport);
+        DBGPRINTF("tcph->dport: %d\n", pkt->tcph->dport);
+        DBGPRINTF("tcph->seq: %u\n", pkt->tcph->seq);
+        DBGPRINTF("tcph->ack: %u\n", pkt->tcph->ack);
+        DBGPRINTF("tcph->flags: %s\n", pkt->tcph->flags);
+    }
+
+    if(pkt->smbh) {
+        DBGPRINTF("smbh->version: %u\n", pkt->smbh->version);
+        DBGPRINTF("smbh->ntstatus: %u\n", pkt->smbh->ntStatus);
+        DBGPRINTF("smbh->opcode: %d\n", pkt->smbh->opcode);
+        DBGPRINTF("smbh->flags: %s\n", pkt->smbh->flags);
+        DBGPRINTF("smbh->seqNumber: %lu\n", pkt->smbh->seqNumber);
+        DBGPRINTF("smbh->procID: %u\n", pkt->smbh->procID);
+        DBGPRINTF("smbh->treeID: %u\n", pkt->smbh->treeID);
+        DBGPRINTF("smbh->userID: %lu\n", pkt->smbh->userID);
+    }
+
+    DBGPRINTF("pkt->src: %0X %0X %0X %0X\n",
+            pkt->src.addr_data32[0],
+            pkt->src.addr_data32[1],
+            pkt->src.addr_data32[2],
+            pkt->src.addr_data32[3]);
+
+    DBGPRINTF("pkt->dst: %0X %0X %0X %0X\n",
+              pkt->dst.addr_data32[0],
+              pkt->dst.addr_data32[1],
+              pkt->dst.addr_data32[2],
+              pkt->dst.addr_data32[3]);
+
+    DBGPRINTF("pkt->sp: %u\n", pkt->sp);
+    DBGPRINTF("pkt->dp: %u\n", pkt->dp);
+    DBGPRINTF("pkt->proto: %u\n", pkt->proto);
+    DBGPRINTF("pkt->ID: %u\n", pkt->pktNumber);
+
+    DBGPRINTF("\n\n########## END ##########\n");
 
 }
 
-/*
- *  This function recovers SMB fields from an impcap metadata json
- *
- *  It gets in parameters:
- *  - the json of impcap metadata
- *  - the tcp_packet to fill informations in
- *
- *  It returns the number of fields recovered
-*/
-int getSMBMetadata(struct json_object *pJson, tcp_packet *pData){
-  struct json_object *obj = NULL;
-  smb_metadata *session;
+Packet *createPacket() {
+    Packet *pkt = malloc(sizeof(Packet));
+    memset(pkt, 0, sizeof(Packet));
 
-  DBGPRINTF("entered getSMBMetadata\n");
-
-  app_header_metadata *appHdrMeta = pData->appHeader;
-  assert(appHdrMeta != NULL);
-
-  session = (smb_metadata *)appHdrMeta->pHdr;
-  if(session == NULL)
-    session = malloc(sizeof(smb_metadata));
-
-  if(fjson_object_object_get_ex(pJson, "SMB_userID", &obj)) {
-    session->sessID = fjson_object_get_int64(obj);
-    DBGPRINTF("session ID: %lu\n", session->sessID);
-  }
-
-  if(fjson_object_object_get_ex(pJson, "SMB_operation", &obj)) {
-    session->opCode = fjson_object_get_int(obj);
-    DBGPRINTF("opCode: %d\n", session->opCode);
-  }
-
-  if(fjson_object_object_get_ex(pJson, "SMB_flags", &obj)) {
-    session->flags = fjson_object_get_string(obj);
-    DBGPRINTF("flags: %s\n", session->flags);
-  }
-
-  if(fjson_object_object_get_ex(pJson, "SMB_seqNumber", &obj)) {
-    session->seqNum = fjson_object_get_int64(obj);
-    DBGPRINTF("sequence number: %lu\n", session->seqNum);
-  }
-
-  if(fjson_object_object_get_ex(pJson, "SMB_processID", &obj)) {
-    session->procID = fjson_object_get_int64(obj);
-    DBGPRINTF("process ID: %lu\n", session->procID);
-  }
-
-  if(fjson_object_object_get_ex(pJson, "SMB_treeID", &obj)) {
-    session->treeID = fjson_object_get_int64(obj);
-    DBGPRINTF("tree ID: %lu\n", session->treeID);
-  }
+    return pkt;
 }
 
-/*
- *  This function recovers TCP fields from an impcap metadata json
- *
- *  It gets in parameters:
- *  - the json of impcap metadata
- *  - the tcp_packet to fill informations in
- *
- *  It returns the number of fields recovered
-*/
-int getTCPMetadata(struct json_object *pJson, tcp_packet *pData) {
-	int iRet = 0;
-	struct json_object *obj = NULL;
-
-	assert(pData->meta != NULL);
-
-	if(fjson_object_object_get_ex(pJson, "net_src_port", &obj)) {
-		iRet++;
-		pData->meta->srcPort = fjson_object_get_int(obj);
-		DBGPRINTF("source_port: %u\n", pData->meta->srcPort);
-    if(pData->meta->srcPort == SMB_PORTS){
-      iRet += getSMBMetadata(pJson, pData);
+void freePacket(Packet *pkt) {
+    if(pkt) {
+        if(pkt->ipv4h)      free(pkt->ipv4h);
+        if(pkt->ipv6h)      free(pkt->ipv6h);
+        if(pkt->tcph)       free(pkt->tcph);
+        if(pkt->smbh)       free(pkt->smbh);
+        if(pkt->payload)    free(pkt->payload);
+        free(pkt);
     }
-	}
-
-	if(fjson_object_object_get_ex(pJson, "net_dst_port", &obj)) {
-		iRet++;
-		pData->meta->dstPort = fjson_object_get_int(obj);
-		DBGPRINTF("dest_port: %u\n", pData->meta->dstPort);
-    if(pData->meta->srcPort == SMB_PORTS){
-      iRet += getSMBMetadata(pJson, pData);
-    }
-	}
-
-	if(fjson_object_object_get_ex(pJson, "TCP_seq_number", &obj)) {
-		iRet++;
-		pData->meta->seqNum = fjson_object_get_int64(obj);
-		DBGPRINTF("seq_number: %lu\n", pData->meta->seqNum);
-	}
-
-	if(fjson_object_object_get_ex(pJson, "TCP_ack_number", &obj)) {
-		iRet++;
-		pData->meta->ackNum = fjson_object_get_int64(obj);
-		DBGPRINTF("ack_number: %lu\n", pData->meta->ackNum);
-	}
-
-	if(fjson_object_object_get_ex(pJson, "net_flags", &obj)) {
-		iRet++;
-		pData->meta->flags = fjson_object_get_string(obj);
-		DBGPRINTF("flags: %s\n", pData->meta->flags);
-	}
-
-  DBGPRINTF("returning from getTCPMetadata\n");
-	return iRet;
 }
 
-/*
- *  This function creates and initialize a tcp_packet structure,
- *  first-level structures are allocated as well
- *
- *  It returns the newly allocated structure
-*/
-tcp_packet* createPacket() {
-  DBGPRINTF("creating packet\n");
-  tcp_packet *pPacket = NULL;
+void updatePacketFromHeaders(Packet *pkt) {
+    if(pkt) {
+        if(pkt->ipv4h) {
+            if(inet_pton(AF_INET, pkt->ipv4h->src, &(pkt->src.address)) != 1) {
+                DBGPRINTF("copy of src ipv4 address failed");
+            }
+            if(inet_pton(AF_INET, pkt->ipv4h->dst, &(pkt->dst.address)) != 1) {
+                DBGPRINTF("copy of dst ipv4 address failed");
+            }
+            pkt->proto = pkt->ipv4h->proto;
+            pkt->flags |= PKT_ADDRS_KNOWN;
+            pkt->flags |= PKT_PROTO_KNOWN;
+            pkt->flags |= PKT_IPV4_ADDR;
+        }
+        else if(pkt->ipv6h) {
+            if(inet_pton(AF_INET6, pkt->ipv6h->src, &(pkt->src.addr_in6addr)) != 1) {
+                DBGPRINTF("copy of src ipv4 address failed");
+            }
+            if(inet_pton(AF_INET6, pkt->ipv6h->dst, &(pkt->dst.addr_in6addr)) != 1) {
+                DBGPRINTF("copy of dst ipv4 address failed");
+            }
+            pkt->flags |= PKT_ADDRS_KNOWN;
+            pkt->flags |= PKT_IPV6_ADDR;
+        }
 
-  if((pPacket = malloc(sizeof(tcp_packet))) != NULL) {
-    if((pPacket->meta = malloc(sizeof(tcp_metadata))) != NULL) {
-      pPacket->meta->flags = NULL;
+        if(pkt->tcph) {
+            pkt->sp = (Port) pkt->tcph->sport;
+            pkt->dp = (Port) pkt->tcph->dport;
+            pkt->flags |= PKT_PORTS_KNOWN;
+        }
+
+        if(pkt->flags & PKT_PORTS_KNOWN &&
+           pkt->flags & PKT_ADDRS_KNOWN &&
+           pkt->flags & PKT_PROTO_KNOWN) {
+            pkt->flags |= PKT_HASH_READY;
+        }
     }
-
-    if((pPacket->pload = malloc(sizeof(tcp_payload))) != NULL) {
-      pPacket->pload->data = NULL;
-    }
-
-    if((pPacket->appHeader = malloc(sizeof(app_header_metadata))) != NULL) {
-      pPacket->appHeader->pHdr = NULL;
-    }
-  }
-
-  return pPacket;
 }
 
-/*
- *  This function completely frees a tcp_packet structure
- *
- *  It gets in parameter the pointer on the structure to free
-*/
-void freePacket(tcp_packet *pPacket) {
-  DBGPRINTF("freeing packet\n");
-	if(pPacket != NULL) {
-    DBGPRINTF("pPacket not null\n");
+/**
+ * simple inline function to compare 2 IPV6 addresses, used to calculate hashes
+ * @param a
+ * @param b
+ * @return
+ */
+static inline int ip6AddressCompare(const uint32_t *a, const uint32_t *b)
+{
+    int i;
 
-		if(pPacket->appHeader != NULL) {
-      DBGPRINTF("appHeader not null\n");
+    for (i = 0; i < 4; i++) {
+        if (a[i] > b[i])
+            return 1;
+        if (a[i] < b[i])
+            break;
+    }
 
-			if(pPacket->appHeader->pHdr != NULL) {
-        DBGPRINTF("pHdr not null\n");
+    return 0;
+}
 
-				switch(pPacket->appHeader->type) {
-					case HEADER_TYPE_FTP:
-							break;
-					case HEADER_TYPE_HTTP:
-							break;
-					case HEADER_TYPE_SMB:
-              DBGPRINTF("appHeader is SMB\n");
+FlowHash calculatePacketFlowHash(Packet *pkt) {
+    uint32_t hash = 0;
 
-							free((smb_metadata *)pPacket->appHeader->pHdr);
-							break;
-					default:
-							break;
-				}
-			}
-			free(pPacket->appHeader);
-      DBGPRINTF("freed appHeader\n");
+    if(pkt) {
+        if(pkt->flags & PKT_HASH_READY) {
+            if(pkt->flags & PKT_IPV4_ADDR) {
+                FlowHashKey4 *fk = malloc(sizeof(FlowHashKey4));
 
-		}
-		if(pPacket->pload != NULL) {
-      DBGPRINTF("pload not null\n");
+                int ai = (pkt->src.addr_data32[0] > pkt->dst.addr_data32[0]);
+                fk->addrs[1-ai] = pkt->src.addr_data32[0];
+                fk->addrs[ai] = pkt->dst.addr_data32[0];
 
-			free(pPacket->pload->data);
-			free(pPacket->pload);
-      DBGPRINTF("freed pload\n");
+                const int pi = (pkt->sp > pkt->dp);
+                fk->ports[1-pi] = pkt->sp;
+                fk->ports[pi] = pkt->dp;
 
-		}
-		if(pPacket->meta != NULL) {
-      DBGPRINTF("meta not null\n");
+                fk->proto = (uint32_t) pkt->proto;
 
-			free(pPacket->meta);
-      DBGPRINTF("freed meta\n");
+                // TODO set random hash seed at program start
+                hash = hashword(fk->u32, 4, (uint32_t) 0);
+                DBGPRINTF("computed packet hash value: %X\n", hash);
 
-		}
-		free(pPacket);
-    DBGPRINTF("freed packet\n");
+                free(fk);
+            }
+            else if(pkt->flags & PKT_IPV6_ADDR) {
+                FlowHashKey6 *fk = malloc(sizeof(FlowHashKey6));
 
-	}
+                if(ip6AddressCompare(pkt->src.addr_data32, pkt->dst.addr_data32)) {
+                    fk->addrs[0] = pkt->src.addr_data32[0];
+                    fk->addrs[1] = pkt->src.addr_data32[1];
+                    fk->addrs[2] = pkt->src.addr_data32[2];
+                    fk->addrs[3] = pkt->src.addr_data32[3];
+                    fk->addrs[4] = pkt->dst.addr_data32[0];
+                    fk->addrs[5] = pkt->dst.addr_data32[1];
+                    fk->addrs[6] = pkt->dst.addr_data32[2];
+                    fk->addrs[7] = pkt->dst.addr_data32[3];
+                }
+                else
+                {
+                    fk->addrs[0] = pkt->dst.addr_data32[0];
+                    fk->addrs[1] = pkt->dst.addr_data32[1];
+                    fk->addrs[2] = pkt->dst.addr_data32[2];
+                    fk->addrs[3] = pkt->dst.addr_data32[3];
+                    fk->addrs[4] = pkt->src.addr_data32[0];
+                    fk->addrs[5] = pkt->src.addr_data32[1];
+                    fk->addrs[6] = pkt->src.addr_data32[2];
+                    fk->addrs[7] = pkt->src.addr_data32[3];
+                }
+
+                const int pi = (pkt->sp > pkt->dp);
+                fk->ports[1-pi] = pkt->sp;
+                fk->ports[pi] = pkt->dp;
+
+                fk->proto = (uint32_t) pkt->proto;
+
+                // TODO set random hash seed at program start
+                hash = hashword(fk->u32, 10, (uint32_t) 0);
+                DBGPRINTF("computed packet hash value: %X\n", hash);
+
+                free(fk);
+            }
+        }
+        else {
+            DBGPRINTF("packet is not complete, cannot compute hash\n")
+        }
+    }
+
+    return hash;
 }

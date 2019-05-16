@@ -39,22 +39,14 @@ Packet *getImpcapData(smsg_t *pMsg) {
 
     msgPropDescr_t *pDesc = malloc(sizeof(msgPropDescr_t));
 
+    /* search for impcap packet metadata */
     msgPropDescrFill(pDesc, (uchar*)IMPCAP_METADATA, strlen(IMPCAP_METADATA));
     localret = msgGetJSONPropJSON(pMsg, pDesc, &pJson);
-
     if(!localret) {
-        pkt = malloc(sizeof(Packet));
-        DBGPRINTF("message has impcap data\n");
+        pkt = createPacket();
 
-        /* expect 'data' field to be present (*should* be the case if 'impcap' is here) */
-        if(fjson_object_object_get_ex(pJson, "length", &obj)) {
-            contentLength = fjson_object_get_int64(obj);
-            DBGPRINTF("data content length: %d\n", contentLength);
-            if(fjson_object_object_get_ex(pJson, "content", &obj)) {
-                content = fjson_object_get_string(obj);
-                pkt->payload = ImpcapDataDecode(content, contentLength);
-                pkt->payloadLen = contentLength/2;
-            }
+        if(fjson_object_object_get_ex(pJson, "ID", &obj)) {
+            pkt->pktNumber = fjson_object_get_int(obj);
         }
 
         if (fjson_object_object_get_ex(pJson, "ETH_type", &obj)) {
@@ -62,26 +54,46 @@ Packet *getImpcapData(smsg_t *pMsg) {
             if(ethType == ETHERTYPE_IPV4) {
                 isIp = 1;
                 pkt->ipv4h = getIpv4Header(pJson);
-                DBGPRINTF("packet is IPV4\n");
+                pkt->proto = pkt->ipv4h->proto;
             }
             else if(ethType == ETHERTYPE_IPV6) {
                 isIp = 1;
                 pkt->ipv6h = getIpv6Header(pJson);
-                DBGPRINTF("packet is IPV6\n");
             }
 
-            if(isIp) {
+            if(isIp && pkt->proto == IPPROTO_TCP) {
                 pkt->tcph = getTcpHeader(pJson);
                 if(pkt->tcph != NULL) {
-                    DBGPRINTF("packet is TCP\n");
-
-                    if(pkt->tcph->dport == SMB_PORTS || pkt->tcph->sport == SMB_PORTS) {
+                    if(     pkt->tcph->dport == SMB_PORT1 ||
+                            pkt->tcph->sport == SMB_PORT1 ||
+                            pkt->tcph->dport == SMB_PORT2 ||
+                            pkt->tcph->sport == SMB_PORT2) {
                         pkt->smbh = getSmbHeader(pJson);
                     }
                 }
             }
         }
+
+        updatePacketFromHeaders(pkt);
+
+        /* search impcap packet data */
+        msgPropDescrFill(pDesc, (uchar*)IMPCAP_DATA, strlen(IMPCAP_DATA));
+        localret = msgGetJSONPropJSON(pMsg, pDesc, &pJson);
+        if(!localret) {
+            DBGPRINTF("getting packet content\n");
+
+            if(fjson_object_object_get_ex(pJson, "length", &obj)) {
+                contentLength = fjson_object_get_int(obj);
+                if(fjson_object_object_get_ex(pJson, "content", &obj)) {
+                    content = fjson_object_get_string(obj);
+                    pkt->payload = ImpcapDataDecode(content, contentLength);
+                    pkt->payloadLen = contentLength/2;
+                }
+            }
+        }
     }
+
+    msgPropDescrDestruct(pDesc);
 
     return pkt;
 }
@@ -114,54 +126,75 @@ char *ImpcapDataDecode(char *hex, uint32_t length) {
 }
 
 TCPHdr *getTcpHeader(struct json_object *pJson) {
-    TCPHdr *tcph = malloc(sizeof(TCPHdr));
+    DBGPRINTF("getting tcp header\n");
     struct json_object *obj = NULL;
+    TCPHdr *tcph = malloc(sizeof(TCPHdr));
+    memset(tcph, 0, sizeof(TCPHdr));
 
     if (fjson_object_object_get_ex(pJson, "net_src_port", &obj)) {
         tcph->sport = fjson_object_get_int(obj);
+        DBGPRINTF("tcph->sport: %u\n", tcph->dport);
     }
 
     if (fjson_object_object_get_ex(pJson, "net_dst_port", &obj)) {
         tcph->dport = fjson_object_get_int(obj);
+        DBGPRINTF("tcph->dport: %u\n", tcph->sport);
     }
 
     if (fjson_object_object_get_ex(pJson, "TCP_seq_number", &obj)) {
-        tcph->seq = fjson_object_get_int(obj);
+        tcph->seq = fjson_object_get_int64(obj);
+        DBGPRINTF("tcph->seq: %u\n", tcph->seq);
     }
 
     if (fjson_object_object_get_ex(pJson, "TCP_ack_number", &obj)) {
-        tcph->ack = fjson_object_get_int(obj);
+        tcph->ack = fjson_object_get_int64(obj);
+        DBGPRINTF("tcph->ack: %u\n", tcph->ack);
     }
 
     if (fjson_object_object_get_ex(pJson, "net_flags", &obj)) {
         tcph->flags = fjson_object_get_string(obj);
+        DBGPRINTF("tcph->flags: %s\n", tcph->flags);
     }
 
+    DBGPRINTF("finished getting tcp header\n");
     return tcph;
 }
 
 IPV6Hdr *getIpv6Header(struct json_object *pJson) {
-    IPV6Hdr *ipv6h = malloc(sizeof(IPV6Hdr));
+    DBGPRINTF("getting IPV6 header\n");
     struct json_object *obj = NULL;
+    IPV6Hdr *ipv6h = malloc(sizeof(IPV6Hdr));
+    memset(ipv6h, 0, sizeof(IPV6Hdr));
+
+    if(!ipv6h) {
+        DBGPRINTF("ipv6h malloc failed\n");
+    }
 
     if (fjson_object_object_get_ex(pJson, "net_dst_ip", &obj)) {
         ipv6h->dst = fjson_object_get_string(obj);
+        DBGPRINTF("ip6h->dst: %s\n", ipv6h->dst);
     }
 
     if (fjson_object_object_get_ex(pJson, "net_src_ip", &obj)) {
         ipv6h->src = fjson_object_get_string(obj);
+        DBGPRINTF("ip6h->src: %s\n", ipv6h->src);
+
     }
 
     if (fjson_object_object_get_ex(pJson, "net_ttl", &obj)) {
         ipv6h->ttl = fjson_object_get_int(obj);
+        DBGPRINTF("ip6h->ttl: %d\n", ipv6h->ttl);
+
     }
 
     return ipv6h;
 }
 
 IPV4Hdr *getIpv4Header(struct json_object *pJson) {
-    IPV4Hdr *ipv4h = malloc(sizeof(IPV4Hdr));
+    DBGPRINTF("getting IPV4 header\n");
     struct json_object *obj = NULL;
+    IPV4Hdr *ipv4h = malloc(sizeof(IPV4Hdr));
+    memset(ipv4h, 0, sizeof(IPV4Hdr));
 
     if (fjson_object_object_get_ex(pJson, "net_dst_ip", &obj)) {
         ipv4h->dst = fjson_object_get_string(obj);
@@ -187,8 +220,10 @@ IPV4Hdr *getIpv4Header(struct json_object *pJson) {
 }
 
 SMBHdr *getSmbHeader(struct json_object *pJson) {
-    SMBHdr *smbh = malloc(sizeof(SMBHdr));
+    DBGPRINTF("getting SMB header\n");
     struct json_object *obj = NULL;
+    SMBHdr *smbh = malloc(sizeof(SMBHdr));
+    memset(smbh, 0, sizeof(SMBHdr));
 
     if (fjson_object_object_get_ex(pJson, "SMB_version", &obj)) {
         smbh->version = fjson_object_get_int(obj);

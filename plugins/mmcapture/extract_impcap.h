@@ -34,13 +34,13 @@
 
 #include <stdint.h>
 #include <json.h>
+#include <arpa/inet.h>
 #include "rsyslog.h"
 #include "packets.h"
 #include "rsconf.h"
 
 #define SMB_PORT1 139
 #define SMB_PORT2 445
-#define SMB_PORTS (SMB_PORT1 || SMB_PORT2)
 #define HTTP_PORT 80
 #define FTP_PORT 21
 #define FTP_PORT_DATA 20
@@ -56,12 +56,14 @@ typedef struct TCPHdr_ {
 #define ETHERTYPE_IPV4  0x0800
 #define ETHERTYPE_IPV6  0X86DD
 
+#define IPPROTO_TCP 6
+
 typedef struct IPV4Hdr_ {
     char *src;
     char *dst;
     uint8_t hLen;
     uint8_t ttl;
-    uint16_t proto;
+    uint8_t proto;
 #define TCP_PROTO 6
 } IPV4Hdr;
 

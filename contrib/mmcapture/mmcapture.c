@@ -184,157 +184,28 @@ CODE_STD_STRING_REQUESTnewActInst(1)
     ABORT_FINALIZE(RS_RET_ERR);
   }
 
-  if(initTcp() == NULL){
-    ABORT_FINALIZE(RS_RET_ERR);
-  }
+//  if(initTcp() == NULL){
+//    ABORT_FINALIZE(RS_RET_ERR);
+//  }
 CODE_STD_FINALIZERnewActInst
 ENDnewActInst
 
 /* runtime functions */
 
-/*
- *  This function converts a char array of ASCII-represented
- *  hexadecimal values into their original data form
- *
- *  It gets in parameters:
- *  - a char array representing the data as ASCII code hexadecimal
- *  - the length of the array
- *
- *  It returns another char array, containing the raw values
- *  The length of this array is always half the length given in parameter
-*/
-char *hexToData(char *hex, uint32_t length) {
-  char *retBuf = malloc(length/2*sizeof(char));
-  int i;
-  DBGPRINTF("hexToData\n");
-  DBGPRINTF("length %d\n", length);
-
-  for(i = 0; i < length; ++i) {
-    if(i%2) {
-      retBuf[i/2] <<= 4;
-      if(hex[i] >= '0' && hex[i] <= '9') {
-        retBuf[i/2] += hex[i] - '0';
-      }
-      else if(hex[i] >= 'A' && hex[i] <= 'F') {
-        retBuf[i/2] += hex[i] - 'A' + 10;
-      }
-    }
-    else {
-      if(hex[i] >= '0' && hex[i] <= '9') {
-        retBuf[i/2] = hex[i] - '0';
-      }
-      else if(hex[i] >= 'A' && hex[i] <= 'F') {
-        retBuf[i/2] = hex[i] - 'A' + 10;
-      }
-    }
-  }
-
-  return retBuf;
-}
-
-/*
-*  This function extracts impcap payload data from a
-*  rsyslog message
- *
- *  It gets in parameters:
- *  - a rsyslog msg
- *  - an empty (but allocated) tcp_packet
- *      (the structure must be created using create_packet)
- *
- *  If the rsyslog message contains an impcap data field,
- *  it will be extracted and added to pData
- *  The functions also returns the payload length (raw data length)
- *  or zero if no impcap payload data was found
-*/
-int getImpcapPayload(smsg_t *pMsg, tcp_packet *pData) {
-  struct json_object *pJson = NULL;
-  struct json_object *obj = NULL;
-  int localRet;
-  size_t contentLength;
-  char *content;
-
-  DBGPRINTF("entered getImpcapPayload\n");
-
-  assert(pData->pload != NULL);
-
-  msgPropDescr_t *pDesc = malloc(sizeof(msgPropDescr_t));
-  msgPropDescrFill(pDesc, (uchar*)IMPCAP_DATA, strlen(IMPCAP_DATA));
-  localRet = msgGetJSONPropJSON(pMsg, pDesc, &pJson);
-
-  if(localRet == 0) {
-    if(fjson_object_object_get_ex(pJson, "length", &obj)) {
-      contentLength = fjson_object_get_int64(obj);
-      if(fjson_object_object_get_ex(pJson, "content", &obj)) {
-        content = fjson_object_get_string(obj);
-        pData->pload->data = hexToData(content, contentLength);
-        pData->pload->length = contentLength/2;
-        return pData->pload->length;
-      }
-    }
-  }
-
-  return 0;
-}
-
-/*
- *  This function extracts impcap metadata from a
- *  rsyslog message
- *
- *  It gets in parameters:
- *  - a rsyslog msg
- *  - an empty (but allocated) tcp_packet
- *      (the structure must be created using create_packet)
- *
- *  If the rsyslog message contains an impcap metadata field,
- *  it will be extracted and added to pData
- *  The functions also returns the number of fields recovered,
- *  or zero if no impcap metadata was found
-*/
-int getImpcapMetadata(smsg_t *pMsg, tcp_packet *pData) {
-  int iRet = 0;
-  int localRet;
-  struct json_object *pJson = NULL;
-  struct json_object *obj = NULL;
-
-  DBGPRINTF("entered getImpcapMetadata\n");
-
-  msgPropDescr_t *pDesc = malloc(sizeof(msgPropDescr_t));
-
-  msgPropDescrFill(pDesc, (uchar*)IMPCAP_METADATA, strlen(IMPCAP_METADATA));
-  localRet = msgGetJSONPropJSON(pMsg, pDesc, &pJson);
-
-  if(localRet == 0) {
-    if(fjson_object_object_get_ex(pJson, "IP_proto", &obj)) {
-      if(fjson_object_get_int(obj) == TCP_PROTO) {
-        getImpcapPayload(pMsg, pData);
-        iRet = getTCPMetadata(pJson, pData);
-      }
-    }
-  }
-
-  msgPropDescrDestruct(pDesc);
-  return iRet;
-}
 
 BEGINdoAction_NoStrings
 DBGPRINTF("entering doAction\n");
   smsg_t **ppMsg = (smsg_t **)pMsgData;
   smsg_t *pMsg = *ppMsg;
 CODESTARTdoAction
-  /* tcp_packet *pData = createPacket();
-
-  if(getImpcapMetadata(pMsg, pData)){
-    checkTcpSessions(pData);
-  }
-
-  freePacket(pData); */
 
   Packet *pkt = getImpcapData(pMsg);
+
+  pkt->hash = calculatePacketFlowHash(pkt);
+
   printPacketInfo(pkt);
 
-  if(pkt != NULL) {
-    free(pkt);
-  }
+  freePacket(pkt);
 ENDdoAction
 
 BEGINparseSelectorAct
