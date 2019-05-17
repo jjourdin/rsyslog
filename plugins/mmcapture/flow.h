@@ -25,7 +25,10 @@
  * limitations under the License.
  */
 
+#include <pthread.h>
+
 #include "packets.h"
+#include "rand_utils.h"
 
 #ifndef FLOW_H
 #define FLOW_H
@@ -37,6 +40,19 @@
         (a)->addr_data32[2] = 0; \
         (a)->addr_data32[3] = 0; \
     } while (0)
+
+typedef struct FlowCnf_ {
+    uint32_t hash_rand;
+    uint32_t hash_size;
+#define FLOW_DEFAULT_HASHSIZE    65536
+
+    // modify those 2 variables using mutex
+    uint32_t flowCount;
+    struct Flow_ *headFlowList;
+    pthread_mutex_t flowList_m;
+} FlowCnf;
+
+extern FlowCnf *globalFlowCnf;
 
 /* FlowHash is just an uint32_t */
 typedef uint32_t FlowHash;
@@ -91,6 +107,11 @@ typedef struct Flow_ {
     uint32_t tosrcpktcnt;
     uint64_t todstbytecnt;
     uint64_t tosrcbytecnt;
+
+    struct Flow_ *prevFlow;
+    struct Flow_ *nextFlow;
 } Flow;
+
+void FlowInitConfig();
 
 #endif /* FLOW_H */

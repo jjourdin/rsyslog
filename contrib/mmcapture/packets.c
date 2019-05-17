@@ -192,8 +192,7 @@ FlowHash calculatePacketFlowHash(Packet *pkt) {
 
                 fk->proto = (uint32_t) pkt->proto;
 
-                // TODO set random hash seed at program start
-                hash = hashword(fk->u32, 4, (uint32_t) 0);
+                hash = hashword(fk->u32, 4, (uint32_t) globalFlowCnf->hash_rand);
                 DBGPRINTF("computed packet hash value: %X\n", hash);
 
                 free(fk);
@@ -229,8 +228,7 @@ FlowHash calculatePacketFlowHash(Packet *pkt) {
 
                 fk->proto = (uint32_t) pkt->proto;
 
-                // TODO set random hash seed at program start
-                hash = hashword(fk->u32, 10, (uint32_t) 0);
+                hash = hashword(fk->u32, 10, (uint32_t) globalFlowCnf->hash_rand);
                 DBGPRINTF("computed packet hash value: %X\n", hash);
 
                 free(fk);

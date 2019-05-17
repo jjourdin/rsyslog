@@ -49,6 +49,7 @@
 #include "file_utils.h"
 #include "tcp_sessions.h"
 #include "packets.h"
+#include "flow.h"
 
 MODULE_TYPE_OUTPUT
 MODULE_TYPE_NOKEEP
@@ -71,6 +72,7 @@ static char* proto_list[] = {
 typedef struct instanceData_s {
   uchar* protocol;
   uchar* folder;
+  FlowCnf *globalFlowCnf;
 } instanceData;
 
 typedef struct wrkrInstanceData {
@@ -132,6 +134,7 @@ DBGPRINTF("entering createInstance\n");
 CODESTARTcreateInstance
   pData->protocol = NULL;
   pData->folder = "/var/log/rsyslog/";  /* default folder for captured files */
+  globalFlowCnf = malloc(sizeof(FlowCnf));
 ENDcreateInstance
 
 BEGINcreateWrkrInstance
@@ -183,6 +186,8 @@ CODE_STD_STRING_REQUESTnewActInst(1)
   if(createFolder(pData->folder)){
     ABORT_FINALIZE(RS_RET_ERR);
   }
+
+  FlowInitConfig();
 
 //  if(initTcp() == NULL){
 //    ABORT_FINALIZE(RS_RET_ERR);

@@ -1,8 +1,8 @@
-/* flow.c
+/* rand_utils.c
  *
- * This file contains functions used for flow handling.
+ *  This file contains functions related to random numbers generation
  *
- * File begun on 2019-05-15
+ * File begun on 2019-17-5
  *
  * Created by:
  *  - Théo Bertin (theo.bertin@advens.fr)
@@ -24,22 +24,12 @@
  * limitations under the License.
  */
 
-#include "flow.h"
+#include "rand_utils.h"
 
-FlowCnf *globalFlowCnf;
+long int getRandom() {
+  struct timeval tv;
+  gettimeofday(&tv, NULL);
+  srand(tv.tv_usec ^ tv.tv_sec);
 
-void FlowInitConfig() {
-    DBGPRINTF("init flow config\n");
-    memset(globalFlowCnf, 0, sizeof(FlowCnf));
-
-    DBGPRINTF("setting random value\n");
-    globalFlowCnf->hash_rand = (uint32_t) getRandom();
-    globalFlowCnf->hash_size = FLOW_DEFAULT_HASHSIZE;
-
-    DBGPRINTF("global flow conf hash_rand: %u\n", globalFlowCnf->hash_rand);
-    DBGPRINTF("global flow conf hash_size: %u\n", globalFlowCnf->hash_size);
-
-    // no lock necessary here, procedure should only be called during startup
-    globalFlowCnf->headFlowList = NULL;
-    globalFlowCnf->flowCount = 0;
+  return rand();
 }
