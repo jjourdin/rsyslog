@@ -40,11 +40,11 @@ typedef struct __attribute__ ((__packed__)) ipv6_header_s {
     #define IPV6_TC_MASK		0x0FF00000
 #endif
 #ifndef IPV6_FLOW_MASK
-	#define IPV6_FLOW_MASK		0x000FFFFF
-#endif
-	uint32_t vtf;
-	uint16_t dataLength;
-	uint8_t nextHeader;
+#define IPV6_FLOW_MASK    0x000FFFFF
+    #endifuint32_t vtf;
+    uint16_t dataLength;
+
+    uint8_t nextHeader;
 #define IPV6_NHDR_HBH     0
 #define IPV6_NHDR_TCP     6
 #define IPV6_NHDR_UDP     17
@@ -58,10 +58,10 @@ typedef struct __attribute__ ((__packed__)) ipv6_header_s {
 #define IPV6_NHDR_NONHDR  59
 #define IPV6_NHDR_DOPTS   60
 
-	uint8_t hopLimit;
-	uint8_t addrSrc[16];
-	uint8_t addrDst[16];
-} ipv6_header_t;
+    uint8_t hopLimit;
+    uint8_t addrSrc[16];
+    uint8_t addrDst[16];
+} ipv6_header_t ;
 #pragma GCC diagnostic pop
 
 #ifndef IPV6_VERSION
@@ -197,8 +197,8 @@ static inline frag_header_parse(uchar **packet, int *pktSize, struct json_object
  *  or the ones after (as a list of bytes), and the length of this data.
 */
 data_ret_t* ipv6_parse(const uchar *packet, int pktSize, struct json_object *jparent) {
-	DBGPRINTF("ipv6_parse\n");
-	DBGPRINTF("packet size %d\n", pktSize);
+    DBGPRINTF("ipv6_parse\n");
+    DBGPRINTF("packet size %d\n", pktSize);
 
     if(pktSize < 40) { /* too small for IPv6 header + data (header might be longer)*/
         DBGPRINTF("IPv6 packet too small : %d\n", pktSize);
