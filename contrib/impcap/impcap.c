@@ -45,6 +45,7 @@
 #include "rsyslog.h"
 #include "prop.h"
 #include "ruleset.h"
+#include "datetime.h"
 
 #include "errmsg.h"
 #include "unicode-helper.h"
@@ -67,9 +68,9 @@ MODULE_CNFNAME("impcap")
 /* static data */
 DEF_IMOD_STATIC_DATA
 DEFobjCurrIf(glbl)
-
 DEFobjCurrIf(prop)
 DEFobjCurrIf(ruleset)
+DEFobjCurrIf(datetime)
 
 static prop_t *pInputName = NULL;
 
@@ -585,19 +586,18 @@ void packet_parse(uchar *arg, const struct pcap_pkthdr *pkthdr, const uchar *pac
 		}
 	}
 
-	/* Get current UTC time and set-it in JSON message - KGuillemot 2019-02-14 */
-	char strtime[30] = {0};
-	struct tm timestruct;
-	time_t rawtime = time(NULL);
-	gmtime_r(&rawtime, &timestruct); // Get the current UTC date
-	strftime(strtime, 30, "%Y-%m-%dT%H:%M:%S%Z", &timestruct); // Format the time as UTC str
-	struct json_object *json = json_object_new_object();
-	json_object_object_add(json, "time", json_object_new_string(strtime));
-	msgAddJSON(pMsg, (uchar*)"!", json, 0, 0); // Add time as root tree key
 
-	struct json_object *jown = json_object_new_object();
-	json_object_object_add(jown, "ID", json_object_new_int(++(*id)));
-	json_object_object_add(jown, "net_bytes_total", json_object_new_int(pkthdr->len));
+  struct json_object *jown = json_object_new_object();
+  json_object_object_add(jown, "ID", json_object_new_int(++(*id)));
+
+    struct syslogTime sysTimePkt;
+    char timeStr[30];
+    datetime.timeval2syslogTime(&pkthdr->ts, &sysTimePkt, 1/*inUTC*/);
+    if(datetime.formatTimestamp3339(&sysTimePkt, timeStr)) {
+        json_object_object_add(jown, "timestamp", json_object_new_string(timeStr));
+    }
+
+    json_object_object_add(jown, "net_bytes_total", json_object_new_int(pkthdr->len));
 
 	data_ret_t * dataLeft = eth_parse(packet, pkthdr->caplen, jown);
 
@@ -670,6 +670,7 @@ CODESTARTmodExit
 	objRelease(glbl, CORE_COMPONENT);
 	objRelease(prop, CORE_COMPONENT);
 	objRelease(ruleset, CORE_COMPONENT);
+    objRelease(datetime, CORE_COMPONENT);
 ENDmodExit
 
 /* declaration of functions */
@@ -684,10 +685,10 @@ CODESTARTqueryEtryPt
 ENDqueryEtryPt
 
 BEGINmodInit()
-
 CODESTARTmodInit
-	*ipIFVersProvided = CURR_MOD_IF_VERSION;
-	CHKiRet(objUse(glbl, CORE_COMPONENT));
-	CHKiRet(objUse(ruleset, CORE_COMPONENT));
-	CHKiRet(objUse(prop, CORE_COMPONENT));
+  *ipIFVersProvided = CURR_MOD_IF_VERSION;
+  CHKiRet(objUse(glbl, CORE_COMPONENT));
+  CHKiRet(objUse(ruleset, CORE_COMPONENT));
+  CHKiRet(objUse(prop, CORE_COMPONENT));
+  CHKiRet(objUse(datetime, CORE_COMPONENT));
 ENDmodInit
