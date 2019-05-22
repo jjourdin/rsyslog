@@ -107,14 +107,14 @@ static inline uint8_t hbh_header_parse(uchar **packet, int *pktSize) {
     DBGPRINTF("hbh_header_parse\n");
     hbh_header_t *hbh_header = (hbh_header_t *)*packet;
 
-  /* hbh_header->hLength is the number of octets of header in 8-octet units minus 1
-   * the header length SHOULD be a multiple of 8 */
-  uint8_t hByteLength = hbh_header->hLength*8 + 8;
-  DBGPRINTF("hByteLength: %d\n", hByteLength);
-  *pktSize -= hByteLength;
-  *packet += hByteLength;
+    /* hbh_header->hLength is the number of octets of header in 8-octet units minus 1
+    * the header length SHOULD be a multiple of 8 */
+    uint8_t hByteLength = hbh_header->hLength*8 + 8;
+    DBGPRINTF("hByteLength: %d\n", hByteLength);
+    *pktSize -= hByteLength;
+    *packet += hByteLength;
 
-  return hbh_header->nextHeader;
+    return hbh_header->nextHeader;
 }
 
 static inline uint8_t dest_header_parse(uchar **packet, int *pktSize) {
@@ -184,33 +184,33 @@ static inline frag_header_parse(uchar **packet, int *pktSize, struct json_object
 }
 
 /*
- *	This function parses the bytes in the received packet to extract IPv6 metadata.
+ *  This function parses the bytes in the received packet to extract IPv6 metadata.
  *
- *	its parameters are:
- *		- a pointer on the list of bytes representing the packet
- *				the first byte must be the beginning of the IPv6 header
- *		- the size of the list passed as first parameter
- *		- a pointer on a json_object, containing all the metadata recovered so far
- *			this is also where IPv6 metadata will be added
+ *  its parameters are:
+ *    - a pointer on the list of bytes representing the packet
+ *        the first byte must be the beginning of the IPv6 header
+ *    - the size of the list passed as first parameter
+ *    - a pointer on a json_object, containing all the metadata recovered so far
+ *      this is also where IPv6 metadata will be added
  *
- *	This function returns a structure containing the data unprocessed by this parser
- *	or the ones after (as a list of bytes), and the length of this data.
+ *  This function returns a structure containing the data unprocessed by this parser
+ *  or the ones after (as a list of bytes), and the length of this data.
 */
 data_ret_t* ipv6_parse(const uchar *packet, int pktSize, struct json_object *jparent) {
 	DBGPRINTF("ipv6_parse\n");
 	DBGPRINTF("packet size %d\n", pktSize);
 
-	if(pktSize < 40) { /* too small for IPv6 header + data (header might be longer)*/
-		DBGPRINTF("IPv6 packet too small : %d\n", pktSize);
-		RETURN_DATA_AFTER(0)
-	}
+    if(pktSize < 40) { /* too small for IPv6 header + data (header might be longer)*/
+        DBGPRINTF("IPv6 packet too small : %d\n", pktSize);
+        RETURN_DATA_AFTER(0)
+    }
 
 	ipv6_header_t *ipv6_header = (ipv6_header_t *)packet;
 
-	char addrSrc[40], addrDst[40];
+    char addrSrc[40], addrDst[40];
 
-	inet_ntop(AF_INET6, (void *)&ipv6_header->addrSrc, addrSrc, 40);
-	inet_ntop(AF_INET6, (void *)&ipv6_header->addrDst, addrDst, 40);
+    inet_ntop(AF_INET6, (void *)&ipv6_header->addrSrc, addrSrc, 40);
+    inet_ntop(AF_INET6, (void *)&ipv6_header->addrDst, addrDst, 40);
 
     json_object_object_add(jparent, "net_dst_ip", json_object_new_string((char*)addrDst));
     json_object_object_add(jparent, "net_src_ip", json_object_new_string((char*)addrSrc));
@@ -226,20 +226,27 @@ data_ret_t* ipv6_parse(const uchar *packet, int pktSize, struct json_object *jpa
     do {
         switch(nextHeader){
             case IPV6_NHDR_HBH:     nextHeader = hbh_header_parse(&packet, &pktSize); break;
-            case IPV6_NHDR_TCP:     return tcp_parse(packet, pktSize, jparent);
-            case IPV6_NHDR_UDP:     return udp_parse(packet, pktSize, jparent);
+            case IPV6_NHDR_TCP:
+                json_object_object_add(jparent, "IP_proto", json_object_new_int(nextHeader));
+                return tcp_parse(packet, pktSize, jparent);
+            case IPV6_NHDR_UDP:
+                json_object_object_add(jparent, "IP_proto", json_object_new_int(nextHeader));
+                return udp_parse(packet, pktSize, jparent);
             case IPV6_NHDR_ENCIP6:  hasNext = 0; break;
             case IPV6_NHDR_ROUT:    nextHeader = route_header_parse(&packet, &pktSize, jparent); break;
             case IPV6_NHDR_FRAG:    nextHeader = frag_header_parse(&packet, &pktSize, jparent); break;
             case IPV6_NHDR_RRSV:    hasNext = 0; break;
             case IPV6_NHDR_SEC:     hasNext = 0; break;
             case IPV6_NHDR_AUTH:    hasNext = 0; break;
-            case IPV6_NHDR_ICMP6:   return icmp_parse(packet, pktSize, jparent);
+            case IPV6_NHDR_ICMP6:
+                json_object_object_add(jparent, "IP_proto", json_object_new_int(nextHeader));
+                return icmp_parse(packet, pktSize, jparent);
             case IPV6_NHDR_NONHDR:  hasNext = 0; break;
             case IPV6_NHDR_DOPTS:   nextHeader = dest_header_parse(&packet, &pktSize); break;
             default:                hasNext = 0; break;
         }
     }while(hasNext);
 
-  RETURN_DATA_AFTER(0)
+    json_object_object_add(jparent, "IP_proto", json_object_new_int(nextHeader));
+    RETURN_DATA_AFTER(0)
 }
