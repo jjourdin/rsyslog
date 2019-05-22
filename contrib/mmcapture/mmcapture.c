@@ -50,6 +50,7 @@
 #include "tcp_sessions.h"
 #include "packets.h"
 #include "flow.h"
+#include "tcp_sessions.h"
 
 MODULE_TYPE_OUTPUT
 MODULE_TYPE_NOKEEP
@@ -70,8 +71,8 @@ static char* proto_list[] = {
 /* conf structures */
 
 typedef struct instanceData_s {
-  uchar* protocol;
-  uchar* folder;
+  char* protocol;
+  char* folder;
   FlowCnf *globalFlowCnf;
 } instanceData;
 
@@ -187,7 +188,7 @@ CODE_STD_STRING_REQUESTnewActInst(1)
     ABORT_FINALIZE(RS_RET_ERR);
   }
 
-  FlowInitConfig();
+  flowInitConfig();
 
 //  if(initTcp() == NULL){
 //    ABORT_FINALIZE(RS_RET_ERR);
@@ -208,7 +209,11 @@ CODESTARTdoAction
 
   pkt->hash = calculatePacketFlowHash(pkt);
 
-  printPacketInfo(pkt);
+//  printPacketInfo(pkt);
+
+  pkt->flow = getOrCreateFlowFromHash(pkt);
+
+  handleTcpFromPacket(pkt);
 
   freePacket(pkt);
 ENDdoAction
