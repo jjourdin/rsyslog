@@ -116,6 +116,7 @@ void freePacket(Packet *pkt) {
 }
 
 void updatePacketFromHeaders(Packet *pkt) {
+    DBGPRINTF("updatePacketFromHeaders\n");
     if(pkt) {
         if(pkt->ipv4h) {
             if(inet_pton(AF_INET, pkt->ipv4h->src, &(pkt->src.address)) != 1) {
@@ -131,12 +132,19 @@ void updatePacketFromHeaders(Packet *pkt) {
         }
         else if(pkt->ipv6h) {
             if(inet_pton(AF_INET6, pkt->ipv6h->src, &(pkt->src.addr_in6addr)) != 1) {
-                DBGPRINTF("copy of src ipv4 address failed");
+                DBGPRINTF("copy of src ipv6 address failed");
             }
             if(inet_pton(AF_INET6, pkt->ipv6h->dst, &(pkt->dst.addr_in6addr)) != 1) {
-                DBGPRINTF("copy of dst ipv4 address failed");
+                DBGPRINTF("copy of dst ipv6 address failed");
             }
+            pkt->proto = pkt->ipv6h->proto;
             pkt->flags |= PKT_ADDRS_KNOWN;
+            if(pkt->proto) {
+                /* proto '0' is a valid Hop-By-Hop IPv6 header,
+                 * but should never be the value contained in impcap metadata
+                 * as it should be further handled by IPv6 parser */
+                pkt->flags |= PKT_PROTO_KNOWN;
+            }
             pkt->flags |= PKT_IPV6_ADDR;
         }
 
@@ -146,6 +154,16 @@ void updatePacketFromHeaders(Packet *pkt) {
             pkt->flags |= PKT_PORTS_KNOWN;
         }
 
+        if(pkt->flags & PKT_PROTO_KNOWN) {
+            switch(pkt->proto) {
+                case IPPROTO_TCP:
+                case IPPROTO_UDP:
+                    if(pkt->flags & PKT_ADDRS_KNOWN && pkt->flags & PKT_PORTS_KNOWN) pkt->flags |= PKT_HASH_READY;
+                    break;
+                default:
+                    if(pkt->flags & PKT_ADDRS_KNOWN) pkt->flags |= PKT_HASH_READY;
+            }
+        }
         if(pkt->flags & PKT_PORTS_KNOWN &&
            pkt->flags & PKT_ADDRS_KNOWN &&
            pkt->flags & PKT_PROTO_KNOWN) {
@@ -156,6 +174,7 @@ void updatePacketFromHeaders(Packet *pkt) {
 
 /**
  * simple inline function to compare 2 IPV6 addresses, used to calculate hashes
+ * (shouldn't be used elsewhere)
  * @param a
  * @param b
  * @return
@@ -175,6 +194,7 @@ static inline int ip6AddressCompare(const uint32_t *a, const uint32_t *b)
 }
 
 FlowHash calculatePacketFlowHash(Packet *pkt) {
+    DBGPRINTF("calculatePacketFlowHash\n");
     uint32_t hash = 0;
 
     if(pkt) {

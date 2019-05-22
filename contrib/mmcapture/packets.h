@@ -32,54 +32,12 @@
 #define PACKETS_H
 
 #include <stdlib.h>
+#include <stdint.h>
 #include <json.h>
 
-#include "rsyslog.h"
 #include "extract_impcap.h"
 #include "flow.h"
 #include "hash_utils.h"
-
-/* Port is just a uint16_t */
-typedef uint16_t Port;
-
-/* Address */
-typedef struct Address_ {
-    char family;
-    union {
-        uint32_t        address_un_data32[4]; /* type-specific field */
-        uint16_t        address_un_data16[8]; /* type-specific field */
-        uint8_t         address_un_data8[16]; /* type-specific field */
-        struct in6_addr address_un_in6;
-    } address;
-} Address;
-
-#define addr_data32 address.address_un_data32
-#define addr_data16 address.address_un_data16
-#define addr_data8  address.address_un_data8
-#define addr_in6addr    address.address_un_in6
-
-#define COPY_ADDR(a, b) do {                    \
-        (b)->family = (a)->family;                 \
-        (b)->addr_data32[0] = (a)->addr_data32[0]; \
-        (b)->addr_data32[1] = (a)->addr_data32[1]; \
-        (b)->addr_data32[2] = (a)->addr_data32[2]; \
-        (b)->addr_data32[3] = (a)->addr_data32[3]; \
-    } while (0)
-
-/* clear the address structure by setting all fields to 0 */
-#define CLEAR_ADDR(a) do {       \
-        (a)->family = 0;         \
-        (a)->addr_data32[0] = 0; \
-        (a)->addr_data32[1] = 0; \
-        (a)->addr_data32[2] = 0; \
-        (a)->addr_data32[3] = 0; \
-    } while (0)
-
-#define CMP_ADDR(a1, a2) \
-    (((a1)->addr_data32[3] == (a2)->addr_data32[3] && \
-      (a1)->addr_data32[2] == (a2)->addr_data32[2] && \
-      (a1)->addr_data32[1] == (a2)->addr_data32[1] && \
-      (a1)->addr_data32[0] == (a2)->addr_data32[0]))
 
 typedef struct Packet_ {
     Address src, dst;
@@ -111,7 +69,7 @@ typedef struct Packet_ {
 void printPacketInfo(Packet *);
 Packet *createPacket();
 void freePacket(Packet *);
-void updatePacketFromHeaders(struct Packet_ *);
+void updatePacketFromHeaders(Packet *);
 FlowHash calculatePacketFlowHash(Packet *);
 
 #endif /* PACKETS_H */
