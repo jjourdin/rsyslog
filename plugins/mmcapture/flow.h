@@ -24,46 +24,39 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 #include <pthread.h>
 
-#include "packets.h"
+#include "packet-utils.h"
 #include "rand_utils.h"
+#include "rsyslog.h"
+#include "packets.h"
 
 #ifndef FLOW_H
 #define FLOW_H
 
-/* clear the address structure by setting all fields to 0 */
-#define FLOW_CLEAR_ADDR(a) do {  \
-        (a)->addr_data32[0] = 0; \
-        (a)->addr_data32[1] = 0; \
-        (a)->addr_data32[2] = 0; \
-        (a)->addr_data32[3] = 0; \
-    } while (0)
+#define TO_SERVER 0
+#define TO_CLIENT 1
+
+typedef struct FlowList_ {
+    uint32_t listSize;
+    struct Flow_ *head;
+    struct Flow_ *tail;
+    pthread_mutex_t mLock;
+} FlowList;
 
 typedef struct FlowCnf_ {
     uint32_t hash_rand;
     uint32_t hash_size;
 #define FLOW_DEFAULT_HASHSIZE    65536
 
-    // modify those 2 variables using mutex
-    uint32_t flowCount;
-    struct Flow_ *headFlowList;
-    pthread_mutex_t flowList_m;
+    FlowList **flowHashLists;
+    FlowList *flowList;
 } FlowCnf;
 
 extern FlowCnf *globalFlowCnf;
 
 /* FlowHash is just an uint32_t */
 typedef uint32_t FlowHash;
-
-typedef struct FlowAddress_ {
-    union {
-        uint32_t       address_un_data32[4]; /* type-specific field */
-        uint16_t       address_un_data16[8]; /* type-specific field */
-        uint8_t        address_un_data8[16]; /* type-specific field */
-    } address;
-} FlowAddress;
 
 /* Hash key for the flow hash */
 typedef struct FlowHashKey4_
@@ -90,18 +83,15 @@ typedef struct FlowHashKey6_
     };
 } FlowHashKey6;
 
-#define addr_data32 address.address_un_data32
-#define addr_data16 address.address_un_data16
-#define addr_data8  address.address_un_data8
-
 typedef struct Flow_ {
-    FlowAddress src, dst;
+    Address src, dst;
     uint16_t sp, dp;
 
     uint8_t proto;
-    uint16_t vlanId;
 
     uint32_t flowHash;
+
+    void *protoCtx;
 
     uint32_t todstpktcnt;
     uint32_t tosrcpktcnt;
@@ -110,8 +100,24 @@ typedef struct Flow_ {
 
     struct Flow_ *prevFlow;
     struct Flow_ *nextFlow;
+
+    pthread_mutex_t mLock;
 } Flow;
 
-void FlowInitConfig();
+#define CMP_FLOW(f1,f2) \
+    (((CMP_ADDR(&(f1)->src, &(f2)->src) && \
+       CMP_ADDR(&(f1)->dst, &(f2)->dst) && \
+       CMP_PORT((f1)->sp, (f2)->sp) && CMP_PORT((f1)->dp, (f2)->dp)) || \
+      (CMP_ADDR(&(f1)->src, &(f2)->dst) && \
+       CMP_ADDR(&(f1)->dst, &(f2)->src) && \
+       CMP_PORT((f1)->sp, (f2)->dp) && CMP_PORT((f1)->dp, (f2)->sp))) && \
+     (f1)->proto == (f2)->proto)
+
+void flowInitConfig();
+Flow *createNewFlowFromPacket(struct Packet_ *);
+Flow *getOrCreateFlowFromHash(struct Packet_ *);
+void swapFlowDirection(Flow *);
+int getPacketFlowDirection(Flow *, struct Packet_ *);
+void printFlowInfo(Flow *);
 
 #endif /* FLOW_H */

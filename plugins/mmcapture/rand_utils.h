@@ -33,4 +33,4 @@
 
 long int getRandom();
 
-#endif RAND_UTILS_H
+#endif /* RAND_UTILS_H */
