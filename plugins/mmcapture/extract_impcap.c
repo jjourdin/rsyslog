@@ -29,7 +29,7 @@
 #include "extract_impcap.h"
 
 Packet *getImpcapData(smsg_t *pMsg) {
-    int localret, isIp = 0;
+    int localret;
     uint32_t contentLength;
     char *content;
     uint16_t ethType;
@@ -52,16 +52,15 @@ Packet *getImpcapData(smsg_t *pMsg) {
         if (fjson_object_object_get_ex(pJson, "ETH_type", &obj)) {
             ethType = fjson_object_get_int(obj);
             if(ethType == ETHERTYPE_IPV4) {
-                isIp = 1;
                 pkt->ipv4h = getIpv4Header(pJson);
                 pkt->proto = pkt->ipv4h->proto;
             }
             else if(ethType == ETHERTYPE_IPV6) {
-                isIp = 1;
                 pkt->ipv6h = getIpv6Header(pJson);
+                pkt->proto = pkt->ipv6h->proto;
             }
 
-            if(isIp && pkt->proto == IPPROTO_TCP) {
+            if(pkt->proto == IPPROTO_TCP) {
                 pkt->tcph = getTcpHeader(pJson);
                 if(pkt->tcph != NULL) {
                     if(     pkt->tcph->dport == SMB_PORT1 ||
@@ -184,7 +183,10 @@ IPV6Hdr *getIpv6Header(struct json_object *pJson) {
     if (fjson_object_object_get_ex(pJson, "net_ttl", &obj)) {
         ipv6h->ttl = fjson_object_get_int(obj);
         DBGPRINTF("ip6h->ttl: %d\n", ipv6h->ttl);
+    }
 
+    if (fjson_object_object_get_ex(pJson, "IP_proto", &obj)) {
+        ipv6h->proto = fjson_object_get_int(obj);
     }
 
     return ipv6h;

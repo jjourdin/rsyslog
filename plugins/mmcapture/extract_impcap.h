@@ -56,21 +56,19 @@ typedef struct TCPHdr_ {
 #define ETHERTYPE_IPV4  0x0800
 #define ETHERTYPE_IPV6  0X86DD
 
-#define IPPROTO_TCP 6
-
 typedef struct IPV4Hdr_ {
     char *src;
     char *dst;
     uint8_t hLen;
     uint8_t ttl;
     uint8_t proto;
-#define TCP_PROTO 6
 } IPV4Hdr;
 
 typedef struct IPV6Hdr_ {
     char *src;
     char *dst;
     uint8_t ttl;
+    uint8_t proto;
 } IPV6Hdr;
 
 typedef struct SMBHdr_ {
