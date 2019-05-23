@@ -120,40 +120,43 @@ int tcpSessionInitFromPacket(TcpSession *tcpSession, Packet *pkt) {
         if(pkt->proto == IPPROTO_TCP && pkt->tcph) {
             char flags[10];
             uint32_t tcpDataLength = pkt->payloadLen;
+            TcpConnection *srcCon = tcpSession->cCon;
+            TcpConnection *dstCon = tcpSession->sCon;
+            TCPHdr *header = pkt->tcph;
 
-            tcpSession->cCon->initSeq = pkt->tcph->seq;
-            tcpSession->cCon->lastAck = pkt->tcph->ack;
+            srcCon->initSeq = header->seq;
+            srcCon->lastAck = header->ack;
 
-            strncpy(flags, pkt->tcph->flags, 10);
+            strncpy(flags, header->flags, 10);
 
             if(HAS_TCP_FLAG(flags, 'S') && HAS_TCP_FLAG(flags, 'A')) {
                 // connection was initiated by the destination, we need to swap connections
                 swapTcpConnections(tcpSession);
                 swapFlowDirection(pkt->flow);
-                tcpSession->cCon->state = TCP_SYN_SENT;
-                tcpSession->sCon->state = TCP_SYN_RECV;
-                tcpSession->cCon->initSeq = pkt->tcph->ack-1;
-                tcpSession->cCon->nextSeq = pkt->tcph->ack;
-                tcpSession->sCon->nextSeq = pkt->tcph->seq + 1;
+                srcCon->state = TCP_SYN_SENT;
+                dstCon->state = TCP_SYN_RECV;
+                srcCon->initSeq = header->ack-1;
+                srcCon->nextSeq = header->ack;
+                dstCon->nextSeq = header->seq + 1;
             }
             else if(HAS_TCP_FLAG(flags, 'S')) {
                 // connection is beginning
-                tcpSession->cCon->state = TCP_SYN_SENT;
-                tcpSession->sCon->state = TCP_LISTEN;
-                tcpSession->cCon->nextSeq = tcpSession->cCon->initSeq + 1;
+                srcCon->state = TCP_SYN_SENT;
+                dstCon->state = TCP_LISTEN;
+                srcCon->nextSeq = srcCon->initSeq + 1;
             }
             else if(HAS_TCP_FLAG(flags, 'F')) {
                 /* connection is closing, but specific state is unknown
                  * it's not a problem as there is still at least one packet to receive */
-                tcpSession->sCon->state = TCP_FIN_WAIT1;
-                tcpSession->cCon->state = TCP_CLOSE_WAIT;
+                dstCon->state = TCP_FIN_WAIT1;
+                srcCon->state = TCP_CLOSE_WAIT;
 
-                tcpSession->cCon->nextSeq = pkt->tcph->seq + 1;
+                srcCon->nextSeq = header->seq + 1;
             }
             else if(HAS_TCP_FLAG(flags, 'A')) {
                 // connection is established or closing
-                tcpSession->cCon->state = TCP_ESTABLISHED;
-                tcpSession->sCon->state = TCP_ESTABLISHED;
+                srcCon->state = TCP_ESTABLISHED;
+                dstCon->state = TCP_ESTABLISHED;
             }
             else {
                 // probably RST or illegal state, dropping
@@ -161,12 +164,12 @@ int tcpSessionInitFromPacket(TcpSession *tcpSession, Packet *pkt) {
             }
 
 
-            if(pkt->payloadLen) {
-                uint32_t dataLength = pkt->payloadLen;
+            if(tcpDataLength) {
+                uint32_t dataLength = tcpDataLength;
 
-                streamBufferAddDataSegment(tcpSession->cCon->streamBuffer, 0, dataLength, pkt->payload);
+                streamBufferAddDataSegment(srcCon->streamBuffer, 0, dataLength, pkt->payload);
 
-                tcpSession->cCon->nextSeq = tcpSession->cCon->initSeq + dataLength;
+                srcCon->nextSeq = srcCon->initSeq + dataLength;
             }
 
             return 0;
@@ -218,8 +221,9 @@ int tcpSessionUpdateFromPacket(TcpSession *tcpSession, Packet *pkt) {
         if(pkt->proto == IPPROTO_TCP && pkt->tcph) {
             char flags[10];
             uint32_t tcpDataLength = pkt->payloadLen;
+            TCPHdr *header = pkt->tcph;
 
-            strncpy(flags, pkt->tcph->flags, 10);
+            strncpy(flags, header->flags, 10);
 
             TcpConnection *srcCon, *dstCon;
             if(getPacketFlowDirection(pkt->flow, pkt) == TO_SERVER) {
@@ -238,7 +242,7 @@ int tcpSessionUpdateFromPacket(TcpSession *tcpSession, Packet *pkt) {
             }
             else if(HAS_TCP_FLAG(flags, 'S') && HAS_TCP_FLAG(flags, 'A')) {
                 srcCon->state = TCP_SYN_RECV;
-                srcCon->initSeq = pkt->tcph->seq;
+                srcCon->initSeq = header->seq;
                 srcCon->nextSeq = srcCon->initSeq + 1;
             }
             else if(HAS_TCP_FLAG(flags, 'F')) {
@@ -279,18 +283,18 @@ int tcpSessionUpdateFromPacket(TcpSession *tcpSession, Packet *pkt) {
                 DBGPRINTF("tcp session flags unhandled\n");
             }
 
-            if(pkt->payloadLen) {
-                uint32_t dataLength = pkt->payloadLen;
-                uint32_t offset = pkt->tcph->seq - srcCon->initSeq - 1 /* SYN packet */;
+            if(tcpDataLength) {
+                uint32_t dataLength = tcpDataLength;
+                uint32_t offset = header->seq - srcCon->initSeq - 1 /* SYN packet */;
 
                 if(srcCon->state > TCP_ESTABLISHED) offset--; /* FIN packet */
 
                 streamBufferAddDataSegment(srcCon->streamBuffer, offset, dataLength, pkt->payload);
 
-                srcCon->nextSeq += pkt->payloadLen;
+                srcCon->nextSeq += tcpDataLength;
             }
 
-            srcCon->lastAck = pkt->tcph->ack;
+            srcCon->lastAck = header->ack;
 
             return 0;
         }
