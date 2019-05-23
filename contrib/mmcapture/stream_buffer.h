@@ -36,21 +36,27 @@
 #define DEFAULT_BUFF_START_SIZE     4096
 #define BUFF_ADD_BLOCK_SIZE         4096
 
+typedef struct StreamBufferSegment_ {
+    uint32_t length;
+    uint32_t streamOffset;
+    struct StreamBufferSegment_ *next;
+} StreamBufferSegment;
+
 typedef struct StreamBuffer_ {
     uint8_t *buffer;
     uint32_t bufferSize;
     uint32_t bufferFill;
+
+    uint32_t sbsNumber;
+    StreamBufferSegment *sbsList;
 } StreamBuffer;
 
-typedef struct StreamBufferSegment_ {
-    StreamBuffer *streamBuffer;
-    uint32_t length;
-    uint32_t streamOffset;
-} StreamBufferSegment;
 
 StreamBuffer *streamBufferCreate();
 int streamBufferExtend(StreamBuffer *, uint32_t);
 void streamBufferDelete(StreamBuffer *);
-int streamBufferAddDataAtSegment(StreamBufferSegment *, uint8_t *);
+int streamBufferAddDataSegment(StreamBuffer *, uint32_t, uint32_t, uint8_t *);
+void printStreamBufferInfo(StreamBuffer *);
+void printStreamBufferSegmentInfo(StreamBufferSegment *);
 
 #endif /* STREAM_BUFFER_H */

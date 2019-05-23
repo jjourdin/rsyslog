@@ -54,8 +54,13 @@ StreamBuffer *streamBufferCreate() {
 
 void streamBufferDelete(StreamBuffer *sb) {
     if(sb) {
-        if(sb->buffer) {
-            free(sb->buffer);
+        if(sb->buffer) free(sb->buffer);
+
+        StreamBufferSegment *sbsFree, *sbs = sb->sbsList;
+        while(sbs) {
+            sbsFree = sbs;
+            sbs->next;
+            free(sbsFree);
         }
         free(sb);
     }
@@ -66,13 +71,14 @@ int streamBufferExtend(StreamBuffer *sb, uint32_t extLength) {
 
     if(sb) {
         uint8_t i = 0;
+        uint32_t trueExtLength = 0;
         do {
-            i++;
-        }while((i*BUFF_ADD_BLOCK_SIZE) < extLength);
+            trueExtLength = ++i*BUFF_ADD_BLOCK_SIZE;
+        }while((trueExtLength) < extLength);
 
-        sb->buffer = realloc(sb->buffer, sb->bufferSize + i*BUFF_ADD_BLOCK_SIZE);
+        sb->buffer = realloc(sb->buffer, sb->bufferSize + trueExtLength);
         if(sb->buffer) {
-            sb->bufferSize += extLength;
+            sb->bufferSize += trueExtLength;
             return 0;
         }
         else {
@@ -86,25 +92,60 @@ int streamBufferExtend(StreamBuffer *sb, uint32_t extLength) {
     return -1;
 }
 
-int streamBufferAddDataAtSegment(StreamBufferSegment *sbs, uint8_t *data) {
-    DBGPRINTF("streamBufferAddDataAtSegment\n");
+int streamBufferAddDataSegment(StreamBuffer *sb, uint32_t offset, uint32_t dataLength, uint8_t *data) {
+    DBGPRINTF("streamBufferAddDataSegment\n"
+              "offset: %u, dataLength: %u, buffer: %p, data: %p\n", offset, dataLength, sb, data);
 
-    if(sbs) {
-        if(sbs->streamBuffer) {
-            uint32_t offset = sbs->streamOffset;
-            uint32_t dataLength = sbs->length;
-            uint32_t bufferSize = sbs->streamBuffer->bufferSize;
+    if(sb) {
+        uint32_t bufferSize = sb->bufferSize;
 
-            // extend buffer if not big enough
-            if(offset+dataLength > bufferSize) {
-                streamBufferExtend(sbs->streamBuffer, (offset+dataLength)-bufferSize);
-            }
-
-            memmove(sbs->streamBuffer->buffer + offset, data, dataLength);
-
-            return 0;
+        // extend buffer if not big enough
+        if(offset+dataLength > bufferSize) {
+            streamBufferExtend(sb, (offset+dataLength)-bufferSize);
         }
+
+        // add data to buffer
+        memmove(sb->buffer + offset, data, dataLength);
+        sb->bufferFill = offset+dataLength;
+
+        StreamBufferSegment *sbs = calloc(1, sizeof(StreamBufferSegment));
+        sbs->streamOffset = offset;
+        sbs->length = dataLength;
+        sbs->next = sb->sbsList;
+
+        sb->sbsList = sbs;
+        sb->sbsNumber++;
+
+        return 0;
     }
 
     return 1;
+}
+
+void printStreamBufferInfo(StreamBuffer *sb) {
+    DBGPRINTF("\n\n########## SB INFO ##########\n");
+
+    DBGPRINTF("sb->bufferSize: %u\n", sb->bufferSize);
+    DBGPRINTF("sb->bufferFill: %u\n", sb->bufferFill);
+    DBGPRINTF("sb->sbsNumber: %u\n", sb->sbsNumber);
+    if(sb->sbsList) {
+        printStreamBufferSegmentInfo(sb->sbsList);
+    }
+
+    DBGPRINTF("\n\n########## END SB INFO ##########\n");
+    return;
+}
+
+void printStreamBufferSegmentInfo(StreamBufferSegment *sbs) {
+    DBGPRINTF("\n\n########## SBS INFO ##########\n");
+
+    DBGPRINTF("sbs->length: %u\n", sbs->length);
+    DBGPRINTF("sbs->offset: %u\n", sbs->streamOffset);
+
+    if(sbs->next) {
+        printStreamBufferSegmentInfo(sbs->next);
+    }
+
+    DBGPRINTF("\n\n########## END SBS INFO ##########\n");
+    return;
 }
