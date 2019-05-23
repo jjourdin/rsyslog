@@ -29,7 +29,7 @@
 #include "tcp_sessions.h"
 
 static inline void tcpConnectionAddInQueue(TcpConnection *connection, TcpQueue *newQueue) {
-    DBGPRINTF("tcpConnectionCreate\n");
+    DBGPRINTF("tcpConnectionAddInQueue\n");
 
     if(connection->queue) {
         newQueue->next = connection->queue;
@@ -51,6 +51,7 @@ static inline TcpConnection *tcpConnectionCreate() {
             return tcpConnection;
         }
 
+        DBGPRINTF("could not create new streamBuffer\n");
         free(tcpConnection);
     }
 
@@ -153,22 +154,21 @@ int tcpSessionInitFromPacket(TcpSession *tcpSession, Packet *pkt) {
                 // connection is established or closing
                 tcpSession->cCon->state = TCP_ESTABLISHED;
                 tcpSession->sCon->state = TCP_ESTABLISHED;
-
-                tcpSession->cCon->nextSeq = tcpSession->cCon->initSeq + tcpDataLength;
-
-                if(pkt->payloadLen) {
-                    StreamBufferSegment sbs;
-                    sbs.length = pkt->payloadLen;
-                    sbs.streamOffset = pkt->tcph->seq - tcpSession->cCon->initSeq - 1;
-                    sbs.streamBuffer = tcpSession->cCon->streamBuffer;
-
-                    streamBufferAddDataAtSegment(&sbs, pkt->payload);
-                }
             }
             else {
                 // probably RST or illegal state, dropping
                 return 1;
             }
+
+
+            if(pkt->payloadLen) {
+                uint32_t dataLength = pkt->payloadLen;
+
+                streamBufferAddDataSegment(tcpSession->cCon->streamBuffer, 0, dataLength, pkt->payload);
+
+                tcpSession->cCon->nextSeq = tcpSession->cCon->initSeq + dataLength;
+            }
+
             return 0;
         }
     }
@@ -180,11 +180,13 @@ static inline int packetNeedsQueuing(TcpSession *session, Packet *pkt) {
     DBGPRINTF("packetNeedsQueuing\n");
 
     if(getPacketFlowDirection(pkt->flow, pkt) == TO_SERVER) {
-        return session->cCon->nextSeq != pkt->tcph->seq;
+        if(session->cCon->state > TCP_LISTEN) return session->cCon->nextSeq != pkt->tcph->seq;
     }
     else {
-        return session->sCon->nextSeq != pkt->tcph->seq;
+        if(session->sCon->state > TCP_LISTEN) return session->sCon->nextSeq != pkt->tcph->seq;
     }
+
+    return 0;
 }
 
 static inline TcpQueue *packetEnqueue(Packet *pkt) {
@@ -259,6 +261,9 @@ int tcpSessionUpdateFromPacket(TcpSession *tcpSession, Packet *pkt) {
                 else if(srcCon->state == TCP_FIN_WAIT2) {
                     srcCon->state = TCP_TIME_WAIT;
                 }
+                else if(srcCon->state == TCP_SYN_SENT) {
+                    srcCon->state = TCP_ESTABLISHED;
+                }
 
                 if(dstCon->state == TCP_TIME_WAIT) {
                     dstCon->state = TCP_CLOSED;
@@ -266,22 +271,23 @@ int tcpSessionUpdateFromPacket(TcpSession *tcpSession, Packet *pkt) {
                 else if(dstCon->state == TCP_LAST_ACK) {
                     dstCon->state = TCP_CLOSED;
                 }
-
-                if(srcCon->state == TCP_ESTABLISHED) {
-                    if(pkt->payloadLen) {
-                        StreamBufferSegment sbs;
-                        sbs.length = pkt->payloadLen;
-                        sbs.streamOffset = pkt->tcph->seq - srcCon->initSeq - 1;
-                        sbs.streamBuffer = srcCon->streamBuffer;
-
-                        streamBufferAddDataAtSegment(&sbs, pkt->payload);
-
-                        srcCon->nextSeq += pkt->payloadLen;
-                    }
+                else if(dstCon->state == TCP_SYN_RECV) {
+                    dstCon->state = TCP_ESTABLISHED;
                 }
             }
             else {
                 DBGPRINTF("tcp session flags unhandled\n");
+            }
+
+            if(pkt->payloadLen) {
+                uint32_t dataLength = pkt->payloadLen;
+                uint32_t offset = pkt->tcph->seq - srcCon->initSeq - 1 /* SYN packet */;
+
+                if(srcCon->state > TCP_ESTABLISHED) offset--; /* FIN packet */
+
+                streamBufferAddDataSegment(srcCon->streamBuffer, offset, dataLength, pkt->payload);
+
+                srcCon->nextSeq += pkt->payloadLen;
             }
 
             srcCon->lastAck = pkt->tcph->ack;
@@ -308,21 +314,64 @@ int handleTcpFromPacket(Packet *pkt) {
             else
             {
                 if(packetNeedsQueuing(session, pkt)) {
+                    DBGPRINTF("packetNeedsQueuing: yes\n");
                     TcpQueue *tcpQueue = packetEnqueue(pkt);
                     if(getPacketFlowDirection(pkt->flow, pkt) == TO_SERVER) {
-                        tcpConnectionAddInQueue(session->cCon->queue, tcpQueue);
+                        tcpConnectionAddInQueue(session->cCon, tcpQueue);
                     }
                     else {
-                        tcpConnectionAddInQueue(session->sCon->queue, tcpQueue);
+                        tcpConnectionAddInQueue(session->sCon, tcpQueue);
                     }
                 }
                 else {
+                    DBGPRINTF("packetNeedsQueuing: no\n");
                     tcpSessionUpdateFromPacket(session, pkt);
                 }
             }
+            printTcpSessionInfo(session);
+
             return 0;
         }
         return 1;
     }
     return -1;
+}
+
+void printTcpQueueInfo(TcpQueue *queue) {
+    DBGPRINTF("\n\n########## TCPQUEUE INFO ##########\n");
+
+    DBGPRINTF("tcpQueue->tcp_flags: %s\n", queue->tcp_flags);
+    DBGPRINTF("tcpQueue->seq: %X\n", queue->seq);
+    DBGPRINTF("tcpQueue->ack: %X\n", queue->ack);
+    DBGPRINTF("tcpQueue->dataLength: %u\n", queue->dataLength);
+
+    if(queue->next) printTcpQueueInfo(queue->next);
+
+    DBGPRINTF("\n\n########## END TCPQUEUE INFO ##########\n");
+    return;
+}
+
+void printTcpConnectionInfo(TcpConnection *connection) {
+    DBGPRINTF("\n\n########## TCPCONNECTION INFO ##########\n");
+
+    DBGPRINTF("connection->state: %u\n", connection->state);
+    DBGPRINTF("connection->initSeq: %X\n", connection->initSeq);
+    DBGPRINTF("connection->nextSeq: %X\n", connection->nextSeq);
+    DBGPRINTF("connection->lastAck: %X\n", connection->lastAck);
+
+    if(connection->queue) printTcpQueueInfo(connection->queue);
+    if(connection->streamBuffer) printStreamBufferInfo(connection->streamBuffer);
+
+    DBGPRINTF("\n\n########## END TCPCONNECTION INFO ##########\n");
+    return;
+}
+
+void printTcpSessionInfo(TcpSession *session) {
+    DBGPRINTF("\n\n########## TCPSESSION INFO ##########\n");
+
+    if(session->cCon) printTcpConnectionInfo(session->cCon);
+    if(session->sCon) printTcpConnectionInfo(session->sCon);
+
+    DBGPRINTF("\n\n########## END TCPSESSION INFO ##########\n");
+    return;
 }

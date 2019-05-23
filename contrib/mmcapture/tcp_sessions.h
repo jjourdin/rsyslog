@@ -84,4 +84,8 @@ typedef struct TcpSession_{
 int tcpSessionInitFromPacket(TcpSession *, Packet *);
 int tcpSessionUpdateFromPacket(TcpSession *, Packet *);
 int handleTcpFromPacket(Packet *);
+void printTcpQueueInfo(TcpQueue *);
+void printTcpConnectionInfo(TcpConnection *);
+void printTcpSessionInfo(TcpSession *);
+
 #endif /* TCP_SESSIONS_H */

@@ -202,6 +202,7 @@ Flow *getOrCreateFlowFromHash(Packet *packet) {
     }
     else {
         DBGPRINTF("found existing flow\n");
+        DBGPRINTF("number of followed flows: %u\n", globalFlowCnf->flowList->listSize);
     }
 
     return flow;
@@ -286,4 +287,5 @@ void printFlowInfo(Flow *flow) {
 
     DBGPRINTF("\n\n########## END ##########\n");
 
+    return;
 }
