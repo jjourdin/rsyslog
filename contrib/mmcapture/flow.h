@@ -93,10 +93,10 @@ typedef struct Flow_ {
 
     void *protoCtx;
 
-    uint32_t todstpktcnt;
-    uint32_t tosrcpktcnt;
-    uint64_t todstbytecnt;
-    uint64_t tosrcbytecnt;
+    uint32_t toDstPktCnt;
+    uint32_t toSrcPktCnt;
+    uint64_t toDstByteCnt;
+    uint64_t toSrcByteCnt;
 
     struct Flow_ *prevFlow;
     struct Flow_ *nextFlow;

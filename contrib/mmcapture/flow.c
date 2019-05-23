@@ -165,6 +165,10 @@ Flow *createNewFlowFromPacket(Packet *packet) {
             packet->hash = calculatePacketFlowHash(packet);
         }
         flow->flowHash = packet->hash;
+        flow->toDstPktCnt = 1;
+        flow->toDstByteCnt = packet->payloadLen;
+        flow->toSrcPktCnt = 0;
+        flow->toDstByteCnt = 0;
         packet->flow = flow;
     }
 
@@ -203,6 +207,14 @@ Flow *getOrCreateFlowFromHash(Packet *packet) {
     else {
         DBGPRINTF("found existing flow\n");
         DBGPRINTF("number of followed flows: %u\n", globalFlowCnf->flowList->listSize);
+        if(getPacketFlowDirection(flow, packet) == TO_SERVER) {
+            flow->toDstByteCnt++;
+            flow->toDstByteCnt += packet->payloadLen;
+        }
+        else {
+            flow->toSrcPktCnt++;
+            flow->toSrcByteCnt += packet->payloadLen;
+        }
     }
 
     return flow;
@@ -278,10 +290,10 @@ void printFlowInfo(Flow *flow) {
     DBGPRINTF("flow->proto: %u\n", flow->proto);
     DBGPRINTF("flow->hash: %u\n", flow->flowHash);
     DBGPRINTF("flow->protoCtx: %p\n", flow->protoCtx);
-    DBGPRINTF("flow->todstpktcnt: %u\n", flow->todstpktcnt);
-    DBGPRINTF("flow->tosrcpktcnt: %u\n", flow->tosrcpktcnt);
-    DBGPRINTF("flow->todstbytecnt: %u\n", flow->todstbytecnt);
-    DBGPRINTF("flow->tosrcbytecnt: %u\n", flow->tosrcbytecnt);
+    DBGPRINTF("flow->toDstPktCnt: %u\n", flow->toDstPktCnt);
+    DBGPRINTF("flow->toSrcPktCnt: %u\n", flow->toSrcPktCnt);
+    DBGPRINTF("flow->toDstByteCnt: %u\n", flow->toDstByteCnt);
+    DBGPRINTF("flow->toSrcByteCnt: %u\n", flow->toSrcByteCnt);
     DBGPRINTF("flow->prevFlow: %p\n", flow->prevFlow);
     DBGPRINTF("flow->nextFlow: %p\n", flow->nextFlow);
 
