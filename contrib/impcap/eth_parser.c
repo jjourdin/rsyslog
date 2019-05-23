@@ -149,13 +149,32 @@ data_ret_t* eth_parse(const uchar *packet, int pktSize, struct json_object *jpar
 		hdrLen += 4;
 	}
 
-	if(ethType < 1500) {
-		/* this is a LLC header */
-		json_object_object_add(jparent, "ETH_len", json_object_new_int(ethType));
-		return llc_parse(packet + hdrLen, pktSize - hdrLen, jparent);
-	}
+	data_ret_t *ret;
+
+    if(ethType < 1500) {
+        /* this is a LLC header */
+        json_object_object_add(jparent, "ETH_len", json_object_new_int(ethType));
+        ret = llc_parse(packet + hdrLen, pktSize - hdrLen, jparent);
+
+        /* packet has the minimum allowed size, so the remaining data is
+         * most likely padding, this should not appear as data, so remove it
+         * */
+        //TODO this is a quick win, a more elaborate solution would be to check if data
+        // is indeed zero, but that would take more processing time
+        if(pktSize <= 60) {
+            ret->size = 0;
+        }
+        return ret;
+    }
 
 	json_object_object_add(jparent, "ETH_type", json_object_new_int(ethType));
 	json_object_object_add(jparent, "ETH_typestr", json_object_new_string((char*)eth_type_to_string(ethType)));
-	return (*ethProtoHandlers[ethType])((packet + hdrLen), (pktSize - hdrLen), jparent);
+	ret = (*ethProtoHandlers[ethType])((packet + hdrLen), (pktSize - hdrLen), jparent);
+
+    /* packet has the minimum allowed size, so the remaining data is
+     * most likely padding, this should not appear as data, so remove it */
+    if(pktSize <= 60) {
+        ret->size = 0;
+    }
+    return ret;
 }
