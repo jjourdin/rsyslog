@@ -113,6 +113,41 @@ static inline void swapTcpConnections(TcpSession *tcpSession) {
     return;
 }
 
+static inline int packetNeedsQueuing(TcpSession *session, Packet *pkt) {
+    DBGPRINTF("packetNeedsQueuing\n");
+
+    if(getPacketFlowDirection(pkt->flow, pkt) == TO_SERVER) {
+        if(session->cCon->state > TCP_LISTEN) return session->cCon->nextSeq != pkt->tcph->seq;
+    }
+    else {
+        if(session->sCon->state > TCP_LISTEN) return session->sCon->nextSeq != pkt->tcph->seq;
+    }
+
+    return 0;
+}
+
+static inline TcpQueue *packetEnqueue(Packet *pkt) {
+    DBGPRINTF("packetEnqueue\n");
+
+    TcpQueue *queue = calloc(1, sizeof(TcpQueue));
+
+    if(queue) {
+        strncpy(queue->tcp_flags, pkt->tcph->flags, 10);
+        queue->seq = pkt->tcph->seq;
+        queue->ack = pkt->tcph->ack;
+        queue->dataLength = pkt->payloadLen;
+        if(queue->dataLength) {
+            queue->data = calloc(1, queue->dataLength);
+            memmove(queue->data, pkt->payload, queue->dataLength);
+        }
+    }
+    else {
+        DBGPRINTF("could not create TcpQueue\n");
+    }
+
+    return queue;
+}
+
 int tcpSessionInitFromPacket(TcpSession *tcpSession, Packet *pkt) {
     DBGPRINTF("tcpSessionInitFromPacket\n");
 
@@ -156,7 +191,6 @@ int tcpSessionInitFromPacket(TcpSession *tcpSession, Packet *pkt) {
             else if(HAS_TCP_FLAG(flags, 'A')) {
                 // connection is established or closing
                 srcCon->state = TCP_ESTABLISHED;
-                dstCon->state = TCP_ESTABLISHED;
             }
             else {
                 // probably RST or illegal state, dropping
@@ -166,9 +200,7 @@ int tcpSessionInitFromPacket(TcpSession *tcpSession, Packet *pkt) {
 
             if(tcpDataLength) {
                 uint32_t dataLength = tcpDataLength;
-
                 streamBufferAddDataSegment(srcCon->streamBuffer, 0, dataLength, pkt->payload);
-
                 srcCon->nextSeq = srcCon->initSeq + dataLength;
             }
 
@@ -177,41 +209,6 @@ int tcpSessionInitFromPacket(TcpSession *tcpSession, Packet *pkt) {
     }
 
     return -1;
-}
-
-static inline int packetNeedsQueuing(TcpSession *session, Packet *pkt) {
-    DBGPRINTF("packetNeedsQueuing\n");
-
-    if(getPacketFlowDirection(pkt->flow, pkt) == TO_SERVER) {
-        if(session->cCon->state > TCP_LISTEN) return session->cCon->nextSeq != pkt->tcph->seq;
-    }
-    else {
-        if(session->sCon->state > TCP_LISTEN) return session->sCon->nextSeq != pkt->tcph->seq;
-    }
-
-    return 0;
-}
-
-static inline TcpQueue *packetEnqueue(Packet *pkt) {
-    DBGPRINTF("packetEnqueue\n");
-
-    TcpQueue *queue = calloc(1, sizeof(TcpQueue));
-
-    if(queue) {
-        strncpy(queue->tcp_flags, pkt->tcph->flags, 10);
-        queue->seq = pkt->tcph->seq;
-        queue->ack = pkt->tcph->ack;
-        queue->dataLength = pkt->payloadLen;
-        if(queue->dataLength) {
-            queue->data = calloc(1, queue->dataLength);
-            memmove(queue->data, pkt->payload, queue->dataLength);
-        }
-    }
-    else {
-        DBGPRINTF("could not create TcpQueue\n");
-    }
-
-    return queue;
 }
 
 int tcpSessionUpdateFromPacket(TcpSession *tcpSession, Packet *pkt) {
@@ -235,6 +232,12 @@ int tcpSessionUpdateFromPacket(TcpSession *tcpSession, Packet *pkt) {
                 dstCon = tcpSession->cCon;
             }
 
+            // if connection was init while active
+            if(!srcCon->initSeq) {
+                srcCon->initSeq = header->seq - 1; /* to "simulate" influence of SYN packet for dataLength calculations */
+                srcCon->nextSeq = srcCon->initSeq + 1;
+            }
+
             if(HAS_TCP_FLAG(flags, 'R')){
                 srcCon->state = TCP_CLOSED;
                 dstCon->state = TCP_CLOSED;
@@ -251,7 +254,7 @@ int tcpSessionUpdateFromPacket(TcpSession *tcpSession, Packet *pkt) {
                 if(srcCon->state == TCP_CLOSE_WAIT) {
                     srcCon->state = TCP_LAST_ACK;
                 }
-                else if(srcCon->state == TCP_ESTABLISHED) {
+                else if(srcCon->state <= TCP_ESTABLISHED) {
                     srcCon->state = TCP_FIN_WAIT1;
                     /* to ease computation, we assume destination
                      * received this packet */
@@ -265,7 +268,7 @@ int tcpSessionUpdateFromPacket(TcpSession *tcpSession, Packet *pkt) {
                 else if(srcCon->state == TCP_FIN_WAIT2) {
                     srcCon->state = TCP_TIME_WAIT;
                 }
-                else if(srcCon->state == TCP_SYN_SENT) {
+                else if(srcCon->state <= TCP_SYN_SENT) {
                     srcCon->state = TCP_ESTABLISHED;
                 }
 
@@ -285,12 +288,10 @@ int tcpSessionUpdateFromPacket(TcpSession *tcpSession, Packet *pkt) {
 
             if(tcpDataLength) {
                 uint32_t dataLength = tcpDataLength;
-                uint32_t offset = header->seq - srcCon->initSeq - 1 /* SYN packet */;
-
-                if(srcCon->state > TCP_ESTABLISHED) offset--; /* FIN packet */
+                uint32_t offset = header->seq - srcCon->initSeq - 1 /* SYN packet = seq+1 but no data */;
+                if(srcCon->state > TCP_ESTABLISHED) offset--; /* FIN packet = seq+1 but no data */
 
                 streamBufferAddDataSegment(srcCon->streamBuffer, offset, dataLength, pkt->payload);
-
                 srcCon->nextSeq += tcpDataLength;
             }
 
@@ -298,7 +299,7 @@ int tcpSessionUpdateFromPacket(TcpSession *tcpSession, Packet *pkt) {
 
             return 0;
         }
-        return 1;
+        return -1;
     }
     return -1;
 }
