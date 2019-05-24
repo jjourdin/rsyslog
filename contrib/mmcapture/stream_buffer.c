@@ -53,13 +53,15 @@ StreamBuffer *streamBufferCreate() {
 }
 
 void streamBufferDelete(StreamBuffer *sb) {
+    DBGPRINTF("streamBufferDelete\n");
+
     if(sb) {
         if(sb->buffer) free(sb->buffer);
 
         StreamBufferSegment *sbsFree, *sbs = sb->sbsList;
         while(sbs) {
             sbsFree = sbs;
-            sbs->next;
+            sbs = sbs->next;
             free(sbsFree);
         }
         free(sb);
