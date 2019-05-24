@@ -159,10 +159,10 @@ data_ret_t* eth_parse(const uchar *packet, int pktSize, struct json_object *jpar
         /* packet has the minimum allowed size, so the remaining data is
          * most likely padding, this should not appear as data, so remove it
          * */
-        //TODO this is a quick win, a more elaborate solution would be to check if data
+        //TODO this is a quick win, a more elaborate solution would be to check if all data
         // is indeed zero, but that would take more processing time
-        if(pktSize <= 60) {
-            ret->size = 0;
+        if(pktSize <= 60 && ret->pData != NULL) {
+            if(!ret->pData[0]) ret->size = 0;
         }
         return ret;
     }
@@ -173,8 +173,8 @@ data_ret_t* eth_parse(const uchar *packet, int pktSize, struct json_object *jpar
 
     /* packet has the minimum allowed size, so the remaining data is
      * most likely padding, this should not appear as data, so remove it */
-    if(pktSize <= 60) {
-        ret->size = 0;
+    if(pktSize <= 60 && ret->pData != NULL) {
+        if(!ret->pData[0]) ret->size = 0;
     }
     return ret;
 }
