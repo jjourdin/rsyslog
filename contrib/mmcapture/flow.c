@@ -239,34 +239,49 @@ void swapFlowDirection(Flow *flow) {
     printFlowInfo(flow);
 }
 
-int getPacketFlowDirection(Flow *flow, Packet *pkt) {
-    DBGPRINTF("getPacketFlowDirection\n");
-
-    if(pkt->proto == IPPROTO_TCP || pkt->proto == IPPROTO_UDP) {
-        if(!CMP_PORT(pkt->sp, pkt->dp)) {
-            if(CMP_PORT(pkt->sp, flow->sp)) {
-                return TO_SERVER;
-            }
-            else {
-                return TO_CLIENT;
-            }
-        }
-        else {
-            if(CMP_ADDR(&flow->src, &pkt->src)) {
-                return TO_SERVER;
-            }
-            else {
-                return TO_CLIENT;
-            }
-        }
-    }
-    else if(pkt->proto == IPPROTO_ICMP || pkt->proto == IPPROTO_ICMPV6) {
-        if(CMP_ADDR(&flow->src, &pkt->src)) {
+int getFlowDirectionFromAddrs(Flow *flow, Address *src, Address *dst) {
+    if(!CMP_ADDR(src, dst)) {
+        if(CMP_ADDR(&flow->src, src)) {
             return TO_SERVER;
         }
         else {
             return TO_CLIENT;
         }
+    }
+    else {
+        return -1;
+    }
+}
+
+int getFlowDirectionFromPorts(Flow *flow, const Port sp, const Port dp) {
+    if(!CMP_PORT(sp, dp)) {
+        if(CMP_PORT(sp, flow->sp)) {
+            return TO_SERVER;
+        }
+        else {
+            return TO_CLIENT;
+        }
+    }
+    else {
+        return -1;
+    }
+}
+
+int getPacketFlowDirection(Flow *flow, Packet *pkt) {
+    DBGPRINTF("getPacketFlowDirection\n");
+    int ret;
+
+    if(pkt->proto == IPPROTO_TCP || pkt->proto == IPPROTO_UDP) {
+        ret = getFlowDirectionFromPorts(flow, pkt->sp, pkt->dp);
+        if(ret != -1) {
+            return ret;
+        }
+        else {
+            return getFlowDirectionFromAddrs(flow, &pkt->src, &pkt->dst);
+        }
+    }
+    else if(pkt->proto == IPPROTO_ICMP || pkt->proto == IPPROTO_ICMPV6) {
+        return getFlowDirectionFromAddrs(flow, &pkt->src, &pkt->dst);
     }
 }
 

@@ -117,6 +117,8 @@ void flowInitConfig();
 Flow *createNewFlowFromPacket(struct Packet_ *);
 Flow *getOrCreateFlowFromHash(struct Packet_ *);
 void swapFlowDirection(Flow *);
+int getFlowDirectionFromAddrs(Flow *, Address *, Address *);
+int getFlowDirectionFromPorts(Flow *, const Port, const Port);
 int getPacketFlowDirection(Flow *, struct Packet_ *);
 void printFlowInfo(Flow *);
 
