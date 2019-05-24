@@ -40,6 +40,17 @@ static inline void tcpConnectionPushToQueue(TcpConnection *connection, TcpQueue 
     return;
 }
 
+static inline void tcpQueueListDelete(TcpQueue *head) {
+    DBGPRINTF("tcpQueueListDelete\n");
+
+    if(head) {
+        if(head->next) tcpQueueListDelete(head->next);
+
+        if(head->data) free(head->data);
+        free(head);
+    }
+}
+
 static inline TcpConnection *tcpConnectionCreate() {
     DBGPRINTF("tcpConnectionCreate\n");
 
@@ -65,7 +76,7 @@ static inline void tcpConnectionDelete(TcpConnection *tcpConnection) {
 
     if(tcpConnection) {
         streamBufferDelete(tcpConnection->streamBuffer);
-        free(tcpConnection->queue);
+        tcpQueueListDelete(tcpConnection->queue);
         free(tcpConnection);
     }
 
@@ -94,7 +105,7 @@ static inline TcpSession *tcpSessionCreate() {
     return NULL;
 }
 
-static inline void tcpSessionDelete(TcpSession *tcpSession) {
+void tcpSessionDelete(TcpSession *tcpSession) {
     DBGPRINTF("tcpSessionDelete\n");
 
     if(tcpSession) {
@@ -283,7 +294,6 @@ int tcpConnectionsUpdateFromQueueElem(TcpConnection *srcCon, TcpConnection *dstC
     return -1;
 }
 
-
 static inline int tcpConnectionCanPopFromQueue(TcpConnection *connection) {
     DBGPRINTF("tcpConnectionCanPopFromQueue\n");
 
@@ -332,6 +342,8 @@ static inline int tcpQueueRemoveFromConnection(TcpConnection *connection, TcpQue
 int handleTcpFromPacket(Packet *pkt) {
     DBGPRINTF("handleTcpFromPacket\n");
 
+    int ret = 0;
+
     if(pkt) {
         if(pkt->proto == IPPROTO_TCP) {
             TcpSession *session = (TcpSession *)pkt->flow->protoCtx;
@@ -357,17 +369,18 @@ int handleTcpFromPacket(Packet *pkt) {
                 tcpConnectionPushToQueue(srcCon, tcpQueue);
                 if(tcpConnectionCanPopFromQueue(srcCon)) {
                     do {
-                        tcpConnectionsUpdateFromQueueElem(srcCon, dstCon, tcpQueue);
+                        ret = tcpConnectionsUpdateFromQueueElem(srcCon, dstCon, tcpQueue);
                         tcpQueueRemoveFromConnection(srcCon, tcpQueue);
                         tcpQueue = tcpConnectionGetNextInQueue(srcCon);
-                    }while(tcpQueue);
+                    }while(tcpQueue && !ret);
                 }
+
+                if(ret == 1) return 1;
             }
             printTcpSessionInfo(session);
 
             return 0;
         }
-        return 1;
     }
     return -1;
 }

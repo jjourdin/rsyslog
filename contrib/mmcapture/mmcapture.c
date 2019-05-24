@@ -63,25 +63,25 @@ DEF_OMOD_STATIC_DATA
 #define IMPCAP_DATA     "!data"
 
 static char* proto_list[] = {
-  "http",
-  "ftp",
-  "smb"
+    "http",
+    "ftp",
+    "smb"
 };
 
 /* conf structures */
 
 typedef struct instanceData_s {
-  char* protocol;
-  char* folder;
-  FlowCnf *globalFlowCnf;
+    char* protocol;
+    char* streamStoreFolder;
+    FlowCnf *globalFlowCnf;
 } instanceData;
 
 typedef struct wrkrInstanceData {
-  instanceData *pData;
+    instanceData *pData;
 } wrkrInstanceData_t;
 
 struct modConfData_s {
-  rsconf_t *pConf;
+    rsconf_t *pConf;
 };
 
 static modConfData_t *loadModConf = NULL;
@@ -90,160 +90,204 @@ static modConfData_t *runModConf = NULL;
 /* input instance parameters */
 static struct cnfparamdescr actpdescr[] = {
 	{ "protocol", eCmdHdlrString, 0 },
-  { "folder", eCmdHdlrString, 0 }
+    { "streamStoreFolder", eCmdHdlrString, 0 }
 };
+
 static struct cnfparamblk actpblk =
-{ CNFPARAMBLK_VERSION,
-  sizeof(actpdescr)/sizeof(struct cnfparamdescr),
-  actpdescr
+{
+    CNFPARAMBLK_VERSION,
+    sizeof(actpdescr)/sizeof(struct cnfparamdescr),
+    actpdescr
 };
 
 /* init instance, set parameters */
 
 BEGINbeginCnfLoad
-  DBGPRINTF("entering beginCnfLoad\n");
+    DBGPRINTF("entering beginCnfLoad\n");
 CODESTARTbeginCnfLoad
 	loadModConf = pModConf;
 	pModConf->pConf = pConf;
 ENDbeginCnfLoad
 
 BEGINendCnfLoad
-DBGPRINTF("entering endCnfLoad\n");
+    DBGPRINTF("entering endCnfLoad\n");
 CODESTARTendCnfLoad
 ENDendCnfLoad
 
 BEGINcheckCnf
-DBGPRINTF("entering checkCnf\n");
+    DBGPRINTF("entering checkCnf\n");
 CODESTARTcheckCnf
 ENDcheckCnf
 
 BEGINactivateCnf
-DBGPRINTF("entering activateCnf\n");
+    DBGPRINTF("entering activateCnf\n");
 CODESTARTactivateCnf
 	runModConf = pModConf;
 ENDactivateCnf
 
 BEGINfreeCnf
-DBGPRINTF("entering freeCnf\n");
+    DBGPRINTF("entering freeCnf\n");
 CODESTARTfreeCnf
 ENDfreeCnf
 
 /* create instances */
 
 BEGINcreateInstance
-DBGPRINTF("entering createInstance\n");
+    DBGPRINTF("entering createInstance\n");
 CODESTARTcreateInstance
-  pData->protocol = NULL;
-  pData->folder = "/var/log/rsyslog/";  /* default folder for captured files */
-  globalFlowCnf = malloc(sizeof(FlowCnf));
+    pData->protocol = NULL;
+    pData->streamStoreFolder = "/var/log/rsyslog/";  /* default folder for captured files */
+    globalFlowCnf = malloc(sizeof(FlowCnf));
 ENDcreateInstance
 
 BEGINcreateWrkrInstance
-DBGPRINTF("entering createWrkrInstance\n");
+    DBGPRINTF("entering createWrkrInstance\n");
 CODESTARTcreateWrkrInstance
 ENDcreateWrkrInstance
 
 BEGINfreeInstance
-DBGPRINTF("entering freeInstance\n");
+    DBGPRINTF("entering freeInstance\n");
 CODESTARTfreeInstance
 ENDfreeInstance
 
 BEGINfreeWrkrInstance
-DBGPRINTF("entering freeWrkrInstance\n");
+    DBGPRINTF("entering freeWrkrInstance\n");
 CODESTARTfreeWrkrInstance
 ENDfreeWrkrInstance
 
 BEGINnewActInst
-DBGPRINTF("entering newActInst\n");
-  struct cnfparamvals *pvals;
-  uint16_t i;
+    DBGPRINTF("entering newActInst\n");
+    struct cnfparamvals *pvals;
+    uint16_t i;
 CODESTARTnewActInst
-  if((pvals = nvlstGetParams(lst, &actpblk, NULL)) == NULL) {
+    if((pvals = nvlstGetParams(lst, &actpblk, NULL)) == NULL) {
     ABORT_FINALIZE(RS_RET_MISSING_CNFPARAMS);
-  }
+    }
 
 CODE_STD_STRING_REQUESTnewActInst(1)
-  CHKiRet(OMSRsetEntry(*ppOMSR, 0, NULL, OMSR_TPL_AS_MSG));
-  CHKiRet(createInstance(&pData));
+    CHKiRet(OMSRsetEntry(*ppOMSR, 0, NULL, OMSR_TPL_AS_MSG));
+    CHKiRet(createInstance(&pData));
 
-  for(i = 0; i < actpblk.nParams; ++i) {
-    if(!pvals[i].bUsed)
-      continue;
+    for(i = 0; i < actpblk.nParams; ++i) {
+        if(!pvals[i].bUsed)
+            continue;
 
-    if(!strcmp(actpblk.descr[i].name, "protocol")) {
-      pData->protocol = es_str2cstr(pvals[i].val.d.estr, NULL);
-      DBGPRINTF("protocol set to '%s'", pData->protocol);
+        if(!strcmp(actpblk.descr[i].name, "protocol")) {
+            pData->protocol = es_str2cstr(pvals[i].val.d.estr, NULL);
+            DBGPRINTF("protocol set to '%s'\n", pData->protocol);
+        }
+        else if(!strcmp(actpblk.descr[i].name, "streamStoreFolder")) {
+            char *tempFolder = es_str2cstr(pvals[i].val.d.estr, NULL);
+            char *finalFolder;
+            uint8_t *pChar = tempFolder;
+            uint32_t size = 1;
+            while(*pChar != '\0') { pChar++; size++; }
+            if(*--pChar != '/') {
+                finalFolder = malloc(size + 1);
+                memcpy(finalFolder, tempFolder, size);
+                finalFolder[size - 1] = '/';
+                finalFolder[size] = '\0';
+            }
+            else {
+                finalFolder = tempFolder;
+            }
+
+            pData->streamStoreFolder = finalFolder;
+
+            DBGPRINTF("streamStoreFolder set to '%s'\n", pData->streamStoreFolder);
+
+        }
+        else {
+            LogError(0, RS_RET_PARAM_ERROR, "mmcapture: unhandled parameter '%s'\n", actpblk.descr[i].name);
+        }
     }
-    else if(!strcmp(actpblk.descr[i].name, "folder")) {
-      pData->folder = es_str2cstr(pvals[i].val.d.estr, NULL);
-      DBGPRINTF("folder set to '%s'", pData->folder);
 
+    if(createFolder(pData->streamStoreFolder)){
+        ABORT_FINALIZE(RS_RET_ERR);
     }
-    else {
-      LogError(0, RS_RET_PARAM_ERROR, "mmcapture: unhandled parameter '%s'", actpblk.descr[i].name);
-    }
-  }
 
-  if(createFolder(pData->folder)){
-    ABORT_FINALIZE(RS_RET_ERR);
-  }
+    flowInitConfig();
 
-  flowInitConfig();
-
-//  if(initTcp() == NULL){
-//    ABORT_FINALIZE(RS_RET_ERR);
-//  }
 CODE_STD_FINALIZERnewActInst
 ENDnewActInst
 
 /* runtime functions */
 
-
 BEGINdoAction_NoStrings
-DBGPRINTF("entering doAction\n");
-  smsg_t **ppMsg = (smsg_t **)pMsgData;
-  smsg_t *pMsg = *ppMsg;
+    DBGPRINTF("entering doAction\n");
+    smsg_t **ppMsg = (smsg_t **)pMsgData;
+    smsg_t *pMsg = *ppMsg;
+    int ret;
+    instanceData *pData;
 CODESTARTdoAction
+    pData = pWrkrData->pData;
 
-  Packet *pkt = getImpcapData(pMsg);
+    Packet *pkt = getImpcapData(pMsg);
 
-  pkt->hash = calculatePacketFlowHash(pkt);
+    pkt->hash = calculatePacketFlowHash(pkt);
 
-//  printPacketInfo(pkt);
+//    printPacketInfo(pkt);
 
-  pkt->flow = getOrCreateFlowFromHash(pkt);
+    pkt->flow = getOrCreateFlowFromHash(pkt);
 
-  if(pkt->proto == IPPROTO_TCP)  handleTcpFromPacket(pkt);
+    if(pkt->proto == IPPROTO_TCP) {
+        ret = handleTcpFromPacket(pkt);
 
-  freePacket(pkt);
+        if(ret == 1) {
+            /* session is now closed */
+            TcpSession *session = (TcpSession *) pkt->flow->protoCtx;
+            char fileNameClient[20], fileNameServeur[20];
+            StreamBuffer *sbClient = session->cCon->streamBuffer;
+            StreamBuffer *sbServeur = session->sCon->streamBuffer;
+            snprintf(fileNameClient,
+            20, "tcp-%d-%d.dmp", session->flow->sp, session->flow->dp);
+            snprintf(fileNameServeur,
+            20, "tcp-%d-%d.dmp", session->flow->dp, session->flow->sp);
+            FILE *tmpFileClient = openFile(pData->streamStoreFolder, fileNameClient);
+            FILE *tmpFileServeur = openFile(pData->streamStoreFolder, fileNameServeur);
+
+            if(tmpFileClient && tmpFileServeur) {
+                addDataToFile(sbClient->buffer, sbClient->bufferFill, 0, tmpFileClient);
+                addDataToFile(sbServeur->buffer, sbServeur->bufferFill, 0, tmpFileServeur);
+
+                fclose(tmpFileClient);
+                fclose(tmpFileServeur);
+            }
+
+            tcpSessionDelete(session);
+            pkt->flow->protoCtx = NULL;
+        }
+    }
+
+    freePacket(pkt);
 ENDdoAction
 
 BEGINparseSelectorAct
-DBGPRINTF("entering parseSelectorAct\n");
+    DBGPRINTF("entering parseSelectorAct\n");
 CODESTARTparseSelectorAct
 CODE_STD_STRING_REQUESTparseSelectorAct(1)
 CODE_STD_FINALIZERparseSelectorAct
 ENDparseSelectorAct
 
 BEGINtryResume
-DBGPRINTF("entering tryResume\n");
+    DBGPRINTF("entering tryResume\n");
 CODESTARTtryResume
 ENDtryResume
 
 BEGINisCompatibleWithFeature
-DBGPRINTF("entering isCompatibleWithFeature\n");
+    DBGPRINTF("entering isCompatibleWithFeature\n");
 CODESTARTisCompatibleWithFeature
 ENDisCompatibleWithFeature
 
 BEGINdbgPrintInstInfo
-DBGPRINTF("entering dbgPrintInstInfo\n");
+    DBGPRINTF("entering dbgPrintInstInfo\n");
 CODESTARTdbgPrintInstInfo
 	DBGPRINTF("mmcapture\n");
 ENDdbgPrintInstInfo
 
 BEGINmodExit
 CODESTARTmodExit
-  DBGPRINTF("mmcapture: exit\n");
+    DBGPRINTF("mmcapture: exit\n");
 ENDmodExit
 
 /* declaration of functions */
@@ -258,6 +302,6 @@ ENDqueryEtryPt
 
 BEGINmodInit()
 CODESTARTmodInit
-  DBGPRINTF("mmcapture: init\n");
-  *ipIFVersProvided = CURR_MOD_IF_VERSION;
+    DBGPRINTF("mmcapture: init\n");
+    *ipIFVersProvided = CURR_MOD_IF_VERSION;
 ENDmodInit

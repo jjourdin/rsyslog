@@ -37,6 +37,7 @@
 #include "packets.h"
 #include "stream_buffer.h"
 #include "flow.h"
+#include "file_utils.h"
 
 #define MAX_TCP_SESSIONS 512
 #define TCP_PROTO 6
@@ -85,6 +86,7 @@ typedef struct TcpSession_{
 } TcpSession;
 
 int tcpSessionInitFromPacket(TcpSession *, Packet *);
+void tcpSessionDelete(TcpSession *);
 int tcpConnectionsUpdateFromQueueElem(TcpConnection *, TcpConnection *, TcpQueue *);
 int handleTcpFromPacket(Packet *);
 void printTcpQueueInfo(TcpQueue *);
