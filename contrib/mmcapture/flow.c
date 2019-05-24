@@ -138,9 +138,11 @@ void flowInitConfig() {
 
     globalFlowCnf->hash_rand = (uint32_t) getRandom();
     globalFlowCnf->hash_size = FLOW_DEFAULT_HASHSIZE;
+    globalFlowCnf->maxFlow = FLOW_DEFAULT_MAXCONN;
 
     DBGPRINTF("global flow conf hash_rand: %u\n", globalFlowCnf->hash_rand);
     DBGPRINTF("global flow conf hash_size: %u\n", globalFlowCnf->hash_size);
+    DBGPRINTF("global flow conf maxFlow: %u\n", globalFlowCnf->maxFlow);
 
     globalFlowCnf->flowHashLists = calloc(globalFlowCnf->hash_size, sizeof(FlowList *));
     globalFlowCnf->flowList = initNewFlowList();

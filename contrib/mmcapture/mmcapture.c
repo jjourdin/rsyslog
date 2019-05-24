@@ -90,7 +90,8 @@ static modConfData_t *runModConf = NULL;
 /* input instance parameters */
 static struct cnfparamdescr actpdescr[] = {
 	{ "protocol", eCmdHdlrString, 0 },
-    { "streamStoreFolder", eCmdHdlrString, 0 }
+    { "streamStoreFolder", eCmdHdlrString, 0 },
+    { "maxConnections", eCmdHdlrPositiveInt, 0 }
 };
 
 static struct cnfparamblk actpblk =
@@ -168,6 +169,8 @@ CODE_STD_STRING_REQUESTnewActInst(1)
     CHKiRet(OMSRsetEntry(*ppOMSR, 0, NULL, OMSR_TPL_AS_MSG));
     CHKiRet(createInstance(&pData));
 
+    flowInitConfig();
+
     for(i = 0; i < actpblk.nParams; ++i) {
         if(!pvals[i].bUsed)
             continue;
@@ -175,6 +178,10 @@ CODE_STD_STRING_REQUESTnewActInst(1)
         if(!strcmp(actpblk.descr[i].name, "protocol")) {
             pData->protocol = es_str2cstr(pvals[i].val.d.estr, NULL);
             DBGPRINTF("protocol set to '%s'\n", pData->protocol);
+        }
+        else if(!strcmp(actpblk.descr[i].name, "maxConnections")) {
+            globalFlowCnf->maxFlow = (uint32_t) pvals[i].val.d.n;
+            DBGPRINTF("maxConnections set to %u\n", globalFlowCnf->maxFlow);
         }
         else if(!strcmp(actpblk.descr[i].name, "streamStoreFolder")) {
             char *tempFolder = es_str2cstr(pvals[i].val.d.estr, NULL);
@@ -205,8 +212,6 @@ CODE_STD_STRING_REQUESTnewActInst(1)
     if(createFolder(pData->streamStoreFolder)){
         ABORT_FINALIZE(RS_RET_ERR);
     }
-
-    flowInitConfig();
 
 CODE_STD_FINALIZERnewActInst
 ENDnewActInst

@@ -47,7 +47,10 @@ typedef struct FlowList_ {
 typedef struct FlowCnf_ {
     uint32_t hash_rand;
     uint32_t hash_size;
-#define FLOW_DEFAULT_HASHSIZE    65536
+#define FLOW_DEFAULT_HASHSIZE   65536
+
+    uint32_t maxFlow;
+#define FLOW_DEFAULT_MAXCONN    512
 
     FlowList **flowHashLists;
     FlowList *flowList;
