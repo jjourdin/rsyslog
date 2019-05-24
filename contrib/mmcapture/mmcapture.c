@@ -213,7 +213,7 @@ CODESTARTdoAction
 
   pkt->flow = getOrCreateFlowFromHash(pkt);
 
-  handleTcpFromPacket(pkt);
+  if(pkt->proto == IPPROTO_TCP)  handleTcpFromPacket(pkt);
 
   freePacket(pkt);
 ENDdoAction
