@@ -135,20 +135,24 @@ data_ret_t *ftp_parse(const uchar *packet, int pktSize, struct json_object *jpar
 	uchar *frst_part_ftp;
 	frst_part_ftp = (uchar *)strtok((char *)packet2, " "); // Get first part of packet ftp
 	strtok(NULL, "\r\n");
-	int code = check_Code_ftp(frst_part_ftp);
-	const char *command = check_Command_ftp(frst_part_ftp);
-	free(packet2);
-	if (code != 0) {
-		json_object_object_add(jparent, "FTP_response", json_object_new_int(code));
-		int nb_digits = 1;
-		while( (code/=10) > 0 ) nb_digits++;
-		RETURN_DATA_AFTER(nb_digits)
 
-	} else if (command != NULL) {
-		json_object_object_add(jparent, "FTP_request", json_object_new_string(command));
-		RETURN_DATA_AFTER((int)strlen(command) + 1)
+	if(frst_part_ftp) {
+        int code = check_Code_ftp(frst_part_ftp);
+        const char *command = check_Command_ftp(frst_part_ftp);
+        free(packet2);
+        if (code != 0) {
+            json_object_object_add(jparent, "FTP_response", json_object_new_int(code));
+            int nb_digits = 1;
+            while( (code/=10) > 0 ) nb_digits++;
+            RETURN_DATA_AFTER(nb_digits)
 
-	} else {
-		RETURN_DATA_AFTER(0)
+        } else if (command != NULL) {
+            json_object_object_add(jparent, "FTP_request", json_object_new_string(command));
+            RETURN_DATA_AFTER((int)strlen(command) + 1)
+
+        } else {
+            RETURN_DATA_AFTER(0)
+        }
 	}
+    RETURN_DATA_AFTER(0)
 }
