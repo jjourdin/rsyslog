@@ -46,9 +46,9 @@
 #include "rainerscript.h"
 #include "rsconf.h"
 
+#include "packets.h"
 #include "file_utils.h"
 #include "tcp_sessions.h"
-#include "packets.h"
 #include "flow.h"
 #include "tcp_sessions.h"
 

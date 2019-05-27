@@ -29,7 +29,14 @@
 
 #include <stdlib.h>
 #include <stdint.h>
+#include <sys/param.h>
+
+#ifdef __FreeBSD__
+#include <netinet/in.h>
+#include <sys/socket.h>
+#else
 #include <arpa/inet.h>
+#endif
 
 /* Port is just a uint16_t */
 typedef uint16_t Port;
