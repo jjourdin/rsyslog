@@ -164,11 +164,6 @@ void updatePacketFromHeaders(Packet *pkt) {
                     if(pkt->flags & PKT_ADDRS_KNOWN) pkt->flags |= PKT_HASH_READY;
             }
         }
-        if(pkt->flags & PKT_PORTS_KNOWN &&
-           pkt->flags & PKT_ADDRS_KNOWN &&
-           pkt->flags & PKT_PROTO_KNOWN) {
-            pkt->flags |= PKT_HASH_READY;
-        }
     }
 }
 

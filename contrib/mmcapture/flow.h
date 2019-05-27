@@ -116,7 +116,7 @@ typedef struct Flow_ {
        CMP_PORT((f1)->sp, (f2)->dp) && CMP_PORT((f1)->dp, (f2)->sp))) && \
      (f1)->proto == (f2)->proto)
 
-void flowInitConfig();
+void flowInitConfig(FlowCnf *);
 Flow *createNewFlowFromPacket(struct Packet_ *);
 Flow *getOrCreateFlowFromHash(struct Packet_ *);
 void swapFlowDirection(Flow *);

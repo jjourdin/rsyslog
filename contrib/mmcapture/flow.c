@@ -132,23 +132,28 @@ static inline int removeFlowFromList(Flow *flow, FlowList *flowList) {
     return 0;
 }
 
-void flowInitConfig() {
-    DBGPRINTF("init flow config\n");
-    memset(globalFlowCnf, 0, sizeof(FlowCnf));
+void flowInitConfig(FlowCnf *conf) {
+    DBGPRINTF("init flow config, conf addr: %p\n", conf);
+    memset(conf, 0, sizeof(FlowCnf));
+    DBGPRINTF("memset done\n");
 
-    globalFlowCnf->hash_rand = (uint32_t) getRandom();
-    globalFlowCnf->hash_size = FLOW_DEFAULT_HASHSIZE;
-    globalFlowCnf->maxFlow = FLOW_DEFAULT_MAXCONN;
+    conf->hash_rand = (uint32_t) getRandom();
+    conf->hash_size = FLOW_DEFAULT_HASHSIZE;
+    conf->maxFlow = FLOW_DEFAULT_MAXCONN;
 
-    DBGPRINTF("global flow conf hash_rand: %u\n", globalFlowCnf->hash_rand);
-    DBGPRINTF("global flow conf hash_size: %u\n", globalFlowCnf->hash_size);
-    DBGPRINTF("global flow conf maxFlow: %u\n", globalFlowCnf->maxFlow);
+    DBGPRINTF("global flow conf hash_rand: %u\n", conf->hash_rand);
+    DBGPRINTF("global flow conf hash_size: %u\n", conf->hash_size);
+    DBGPRINTF("global flow conf maxFlow: %u\n", conf->maxFlow);
 
-    globalFlowCnf->flowHashLists = calloc(globalFlowCnf->hash_size, sizeof(FlowList *));
-    globalFlowCnf->flowList = initNewFlowList();
-    if(!globalFlowCnf->flowList) {
+    conf->flowHashLists = calloc(conf->hash_size, sizeof(FlowList *));
+    conf->flowList = initNewFlowList();
+    if(!conf->flowList) {
         DBGPRINTF("error: could not create new flowList for global flow configuration\n")
+        return;
     }
+
+    globalFlowCnf = conf;
+    return;
 }
 
 Flow *createNewFlowFromPacket(Packet *packet) {
@@ -179,7 +184,7 @@ Flow *createNewFlowFromPacket(Packet *packet) {
 }
 
 Flow *getOrCreateFlowFromHash(Packet *packet) {
-    DBGPRINTF("getFlowFromHash\n")
+    DBGPRINTF("getOrCreateFlowFromHash\n")
     FlowList *flowList = NULL;
     FlowHash hash = packet->hash;
     Flow *flow;
@@ -200,11 +205,16 @@ Flow *getOrCreateFlowFromHash(Packet *packet) {
 
 
     if(!flow) {
-        DBGPRINTF("creating new flow and adding it to lists\n");
-        flow = createNewFlowFromPacket(packet);
-        addFlowToList(flow, flowList);
-        addFlowToList(flow, globalFlowCnf->flowList);
-        DBGPRINTF("new number of followed flows: %u\n", globalFlowCnf->flowList->listSize);
+        if(globalFlowCnf->flowList->listSize < globalFlowCnf->maxFlow) {
+            DBGPRINTF("creating new flow and adding it to lists\n");
+            flow = createNewFlowFromPacket(packet);
+            addFlowToList(flow, flowList);
+            addFlowToList(flow, globalFlowCnf->flowList);
+            DBGPRINTF("new number of followed flows: %u\n", globalFlowCnf->flowList->listSize);
+        }
+        else {
+            DBGPRINTF("max number of flows reached, cannot open new Flow\n");
+        }
     }
     else {
         DBGPRINTF("found existing flow\n");

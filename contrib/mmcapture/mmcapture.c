@@ -94,8 +94,7 @@ static struct cnfparamdescr actpdescr[] = {
     { "maxConnections", eCmdHdlrPositiveInt, 0 }
 };
 
-static struct cnfparamblk actpblk =
-{
+static struct cnfparamblk actpblk = {
     CNFPARAMBLK_VERSION,
     sizeof(actpdescr)/sizeof(struct cnfparamdescr),
     actpdescr
@@ -138,7 +137,7 @@ BEGINcreateInstance
 CODESTARTcreateInstance
     pData->protocol = NULL;
     pData->streamStoreFolder = "/var/log/rsyslog/";  /* default folder for captured files */
-    globalFlowCnf = malloc(sizeof(FlowCnf));
+    pData->globalFlowCnf = calloc(1, sizeof(FlowCnf));
 ENDcreateInstance
 
 BEGINcreateWrkrInstance
@@ -169,7 +168,7 @@ CODE_STD_STRING_REQUESTnewActInst(1)
     CHKiRet(OMSRsetEntry(*ppOMSR, 0, NULL, OMSR_TPL_AS_MSG));
     CHKiRet(createInstance(&pData));
 
-    flowInitConfig();
+    flowInitConfig(pData->globalFlowCnf);
 
     for(i = 0; i < actpblk.nParams; ++i) {
         if(!pvals[i].bUsed)
@@ -180,7 +179,7 @@ CODE_STD_STRING_REQUESTnewActInst(1)
             DBGPRINTF("protocol set to '%s'\n", pData->protocol);
         }
         else if(!strcmp(actpblk.descr[i].name, "maxConnections")) {
-            globalFlowCnf->maxFlow = (uint32_t) pvals[i].val.d.n;
+            pData->globalFlowCnf->maxFlow = (uint32_t) pvals[i].val.d.n;
             DBGPRINTF("maxConnections set to %u\n", globalFlowCnf->maxFlow);
         }
         else if(!strcmp(actpblk.descr[i].name, "streamStoreFolder")) {
@@ -233,37 +232,40 @@ CODESTARTdoAction
 
 //    printPacketInfo(pkt);
 
-    pkt->flow = getOrCreateFlowFromHash(pkt);
+    if(pkt->flags & PKT_HASH_READY) {
+        pkt->flow = getOrCreateFlowFromHash(pkt);
 
-    if(pkt->proto == IPPROTO_TCP) {
-        ret = handleTcpFromPacket(pkt);
+        if(pkt->flow && pkt->proto == IPPROTO_TCP) {
+            ret = handleTcpFromPacket(pkt);
 
-        if(ret == 1) {
-            /* session is now closed */
-            TcpSession *session = (TcpSession *) pkt->flow->protoCtx;
-            char fileNameClient[20], fileNameServeur[20];
-            StreamBuffer *sbClient = session->cCon->streamBuffer;
-            StreamBuffer *sbServeur = session->sCon->streamBuffer;
-            snprintf(fileNameClient,
-            20, "tcp-%d-%d.dmp", session->flow->sp, session->flow->dp);
-            snprintf(fileNameServeur,
-            20, "tcp-%d-%d.dmp", session->flow->dp, session->flow->sp);
-            FILE *tmpFileClient = openFile(pData->streamStoreFolder, fileNameClient);
-            FILE *tmpFileServeur = openFile(pData->streamStoreFolder, fileNameServeur);
+            if(ret == 1) {
+                /* session is now closed */
+                TcpSession *session = (TcpSession *) pkt->flow->protoCtx;
+                char fileNameClient[20], fileNameServeur[20];
+                StreamBuffer *sbClient = session->cCon->streamBuffer;
+                StreamBuffer *sbServeur = session->sCon->streamBuffer;
+                snprintf(fileNameClient,
+                20, "tcp-%d-%d.dmp", session->flow->sp, session->flow->dp);
+                snprintf(fileNameServeur,
+                20, "tcp-%d-%d.dmp", session->flow->dp, session->flow->sp);
+                FILE *tmpFileClient = openFile(pData->streamStoreFolder, fileNameClient);
+                FILE *tmpFileServeur = openFile(pData->streamStoreFolder, fileNameServeur);
 
-            if(tmpFileClient && tmpFileServeur) {
-                addDataToFile(sbClient->buffer, sbClient->bufferFill, 0, tmpFileClient);
-                addDataToFile(sbServeur->buffer, sbServeur->bufferFill, 0, tmpFileServeur);
+                if(tmpFileClient && tmpFileServeur) {
+                    addDataToFile(sbClient->buffer, sbClient->bufferFill, 0, tmpFileClient);
+                    addDataToFile(sbServeur->buffer, sbServeur->bufferFill, 0, tmpFileServeur);
 
-                fclose(tmpFileClient);
-                fclose(tmpFileServeur);
+                    fclose(tmpFileClient);
+                    fclose(tmpFileServeur);
+                }
+
+                tcpSessionDelete(session);
+                pkt->flow->protoCtx = NULL;
             }
-
-            tcpSessionDelete(session);
-            pkt->flow->protoCtx = NULL;
         }
     }
 
+    DBGPRINTF("freeing packet\n");
     freePacket(pkt);
 ENDdoAction
 
