@@ -13,3 +13,4 @@ mmcapture_la_SOURCES += extract_impcap.c
 mmcapture_la_SOURCES += hash_utils.c
 mmcapture_la_SOURCES += rand_utils.c
 mmcapture_la_SOURCES += stream_buffer.c
+mmcapture_la_SOURCES += yara_utils.c

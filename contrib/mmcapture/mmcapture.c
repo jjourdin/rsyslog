@@ -38,19 +38,20 @@
 #include <ctype.h>
 #include <json.h>
 #include <sys/types.h>
-
 #include "rsyslog.h"
+
 #include "errmsg.h"
 #include "unicode-helper.h"
 #include "module-template.h"
 #include "rainerscript.h"
 #include "rsconf.h"
-
 #include "packets.h"
+
 #include "file_utils.h"
 #include "tcp_sessions.h"
 #include "flow.h"
 #include "tcp_sessions.h"
+#include <yara.h>
 
 MODULE_TYPE_OUTPUT
 MODULE_TYPE_NOKEEP
