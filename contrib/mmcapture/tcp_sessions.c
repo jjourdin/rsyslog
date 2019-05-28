@@ -226,6 +226,19 @@ int tcpConnectionsUpdateFromQueueElem(TcpConnection *srcCon, TcpConnection *dstC
             srcCon->nextSeq = srcCon->initSeq + 1;
         }
 
+        if(tcpDataLength) {
+            uint32_t dataLength = tcpDataLength;
+            DBGPRINTF("data to get offset -> queue->seq: %u, srcCon->initSeq: %u\n", queue->seq, srcCon->initSeq);
+            uint32_t offset = queue->seq - srcCon->initSeq - 1 /* SYN packet = seq+1 but no data */;
+            if(srcCon->state > TCP_ESTABLISHED) {
+                offset--; /* FIN packet = seq+1 but no data */
+                DBGPRINTF("offset reduced as tcp state over established\n")
+            }
+
+            streamBufferAddDataSegment(srcCon->streamBuffer, offset, dataLength, queue->data);
+            srcCon->nextSeq += tcpDataLength;
+        }
+
         if(HAS_TCP_FLAG(flags, 'R')){
             srcCon->state = TCP_CLOSED;
             dstCon->state = TCP_CLOSED;
@@ -272,15 +285,6 @@ int tcpConnectionsUpdateFromQueueElem(TcpConnection *srcCon, TcpConnection *dstC
         }
         else {
             DBGPRINTF("tcp session flags unhandled\n");
-        }
-
-        if(tcpDataLength) {
-            uint32_t dataLength = tcpDataLength;
-            uint32_t offset = queue->seq - srcCon->initSeq - 1 /* SYN packet = seq+1 but no data */;
-            if(srcCon->state > TCP_ESTABLISHED) offset--; /* FIN packet = seq+1 but no data */
-
-            streamBufferAddDataSegment(srcCon->streamBuffer, offset, dataLength, queue->data);
-            srcCon->nextSeq += tcpDataLength;
         }
 
         srcCon->lastAck = queue->ack;
