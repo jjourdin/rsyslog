@@ -51,7 +51,7 @@
 #include "tcp_sessions.h"
 #include "flow.h"
 #include "tcp_sessions.h"
-#include <yara.h>
+#include "yara_utils.h"
 
 MODULE_TYPE_OUTPUT
 MODULE_TYPE_NOKEEP
@@ -62,6 +62,8 @@ DEF_OMOD_STATIC_DATA
 
 #define IMPCAP_METADATA "!impcap"
 #define IMPCAP_DATA     "!data"
+
+#define YARA_METADATA   "!yara"
 
 static char* proto_list[] = {
     "http",
@@ -75,6 +77,7 @@ typedef struct instanceData_s {
     char* protocol;
     char* streamStoreFolder;
     FlowCnf *globalFlowCnf;
+    YaraCnf *globalYaraCnf;
 } instanceData;
 
 typedef struct wrkrInstanceData {
@@ -92,7 +95,8 @@ static modConfData_t *runModConf = NULL;
 static struct cnfparamdescr actpdescr[] = {
 	{ "protocol", eCmdHdlrString, 0 },
     { "streamStoreFolder", eCmdHdlrString, 0 },
-    { "maxConnections", eCmdHdlrPositiveInt, 0 }
+    { "maxConnections", eCmdHdlrPositiveInt, 0 },
+    { "yaraRuleFile", eCmdHdlrString, 0 }
 };
 
 static struct cnfparamblk actpblk = {
@@ -170,6 +174,7 @@ CODE_STD_STRING_REQUESTnewActInst(1)
     CHKiRet(createInstance(&pData));
 
     flowInitConfig(pData->globalFlowCnf);
+    yaraInit(pData->globalYaraCnf);
 
     for(i = 0; i < actpblk.nParams; ++i) {
         if(!pvals[i].bUsed)
@@ -182,6 +187,26 @@ CODE_STD_STRING_REQUESTnewActInst(1)
         else if(!strcmp(actpblk.descr[i].name, "maxConnections")) {
             pData->globalFlowCnf->maxFlow = (uint32_t) pvals[i].val.d.n;
             DBGPRINTF("maxConnections set to %u\n", globalFlowCnf->maxFlow);
+        }
+        else if(!strcmp(actpblk.descr[i].name, "yaraRuleFile")) {
+            char *yaraRuleFilename = es_str2cstr(pvals[i].val.d.estr, NULL);
+            DBGPRINTF("adding file '%s' to yara compilation\n", yaraRuleFilename);
+            FILE *yaraRuleFile = fopen(yaraRuleFilename, "r");
+
+            if(yaraRuleFile) {
+//                pData->globalYaraCnf->fileList = malloc(sizeof(YaraRuleFile*));
+//                pData->globalYaraCnf->fileList[0]->file = yaraRuleFile;
+//                pData->globalYaraCnf->fileList[0]->filename = yaraRuleFilename;
+//                pData->globalYaraCnf->fileListSize = 1;
+                yaraAddRuleFile(yaraRuleFile, NULL, yaraRuleFilename);
+                if(yaraCompileRules()) {
+                    DBGPRINTF("error while compiling yara rules\n");
+                }
+                else {
+                    DBGPRINTF("yara rules compiled and ready\n");
+                }
+            }
+
         }
         else if(!strcmp(actpblk.descr[i].name, "streamStoreFolder")) {
             char *tempFolder = es_str2cstr(pvals[i].val.d.estr, NULL);
@@ -263,6 +288,34 @@ CODESTARTdoAction
                 tcpSessionDelete(session);
                 pkt->flow->protoCtx = NULL;
             }
+        }
+    }
+
+    if(pkt->payloadLen) {
+        YaraStreamElem *elem = calloc(1, sizeof(YaraStreamElem));
+
+        elem->buffer = pkt->payload;
+        elem->length = pkt->payloadLen;
+        elem->status |= YSE_READY;
+
+        yaraScanStreamElem(elem, 0, 1);
+
+        if(elem->rule) {
+            const char *yaraRuleTag = calloc(1, 50);
+            char tagFieldName[10];
+            int tagNum = 1;
+            struct json_object *jown = json_object_new_object();
+            YR_RULE *rule = elem->rule;
+
+            json_object_object_add(jown, "YaraMatchRule", json_object_new_string(rule->identifier));
+
+            yr_rule_tags_foreach(rule, yaraRuleTag)
+            {
+                snprintf(tagFieldName, 10, "tag%u", tagNum);
+                json_object_object_add(jown, tagFieldName, json_object_new_string(yaraRuleTag));
+            }
+
+            msgAddJSON(pMsg, YARA_METADATA, jown, 0, 0);
         }
     }
 
