@@ -2603,6 +2603,7 @@ echo "    mmdblookup enabled:                       $enable_mmdblookup"
 echo "    mmfields enabled:                         $enable_mmfields"
 echo "    mmrm1stspace module enabled:              $enable_mmrm1stspace"
 echo "    mmkubernetes enabled:                     $enable_mmkubernetes"
+echo "    mmcapture parser module enabled:          $enable_mmcapture"
 echo "    mmtaghostname enabled:                    $enable_mmtaghostname"
 echo
 echo "---{ database support }---"
