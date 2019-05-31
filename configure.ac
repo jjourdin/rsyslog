@@ -80,12 +80,12 @@ PKG_PROG_PKG_CONFIG
 AC_ARG_VAR(CONF_FILE_PATH, Configuration file path (default : /etc/rsyslog.conf))
 if test "$ac_cv_env_CONF_FILE_PATH_set" = "set"; then
 	AC_DEFINE_UNQUOTED(PATH_CONFFILE,  "${ac_cv_env_CONF_FILE_PATH_value}", "Configuration file path (default : /etc/rsyslog.conf)")
-fi 
+fi
 
 AC_ARG_VAR(PID_FILE_PATH, Pid file path (default : /var/run/rsyslogd.pid))
 if test "$ac_cv_env_PID_FILE_PATH_set" = "set"; then
 	AC_DEFINE_UNQUOTED(PATH_PIDFILE,  "${ac_cv_env_PID_FILE_PATH_value}", "Pid file path (default : /var/run/rsyslogd.pid)")
-fi 
+fi
 
 
 # modules we require
@@ -988,7 +988,7 @@ AM_CONDITIONAL(ENABLE_ELASTICSEARCH_TESTS_MINIMAL, test x$enable_elasticsearch_t
 
 
 # capability to enable clickhouse testbench tests. This requries that a test
-# environment is present on the local (127.0.0.1) machine. 
+# environment is present on the local (127.0.0.1) machine.
 AC_ARG_ENABLE(clickhouse_tests,
         [AS_HELP_STRING([--enable-clickhouse-tests],[enable Elasticsearch specific tests in testbench @<:@default=no@:>@])],
         [case "${enableval}" in
@@ -2509,6 +2509,7 @@ AC_CONFIG_FILES([Makefile \
 		contrib/imbatchreport/Makefile \
 		contrib/omfile-hardened/Makefile \
 		contrib/mmkubernetes/Makefile \
+		contrib/mmcapture/Makefile \
 		contrib/impcap/Makefile \
 		contrib/imtuxedoulog/Makefile \
 		contrib/improg/Makefile \

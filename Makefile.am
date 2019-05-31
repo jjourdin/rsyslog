@@ -310,6 +310,9 @@ if ENABLE_IMPCAP
 SUBDIRS += contrib/impcap
 endif
 
+if ENABLE_MMCAPTURE
+SUBDIRS += contrib/mmcapture
+
 # imtuxedoulog
 if ENABLE_IMTUXEDOULOG
 SUBDIRS += contrib/imtuxedoulog
