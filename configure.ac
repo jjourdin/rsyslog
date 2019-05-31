@@ -2342,6 +2342,29 @@ AM_CONDITIONAL(ENABLE_MMKUBERNETES, test x$enable_mmkubernetes = xyes)
 # END Kubernetes metadata support
 
 
+# mmcapture
+
+AC_ARG_ENABLE(mmcapture,
+        [AS_HELP_STRING([--enable-mmcapture],
+            [Enable compilation of the mmcapture module @<:@default=no@:>@])],
+        [case "${enableval}" in
+         yes) enable_mmcapture="yes" ;;
+          no) enable_mmcapture="no" ;;
+           *) AC_MSG_ERROR(bad value ${enableval} for --enable-mmcapture) ;;
+         esac],
+        [enable_mmcapture=no]
+)
+if test "x$enable_mmcapture" = "xyes"; then
+        AC_CHECK_HEADERS([yara.h],
+                        [AC_MSG_NOTICE([libyara found])],
+                        AC_MSG_ERROR([libyara-dev headers not found])
+                        )
+fi
+AM_CONDITIONAL(ENABLE_MMCAPTURE, test x$enable_mmcapture = xyes)
+
+# END mmcapture metadata support
+
+
 # mmtaghostname
 AC_ARG_ENABLE(mmtaghostname,
         [AS_HELP_STRING([--enable-mmtaghostname],[Enable Tag and Hostname messages' modifier @<:@default=no@:>@])],

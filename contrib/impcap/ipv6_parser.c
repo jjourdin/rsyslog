@@ -40,8 +40,9 @@ typedef struct __attribute__ ((__packed__)) ipv6_header_s {
     #define IPV6_TC_MASK		0x0FF00000
 #endif
 #ifndef IPV6_FLOW_MASK
-#define IPV6_FLOW_MASK    0x000FFFFF
-    #endifuint32_t vtf;
+    #define IPV6_FLOW_MASK      0x000FFFFF
+#endif
+    uint32_t vtf;
     uint16_t dataLength;
 
     uint8_t nextHeader;

@@ -310,8 +310,10 @@ if ENABLE_IMPCAP
 SUBDIRS += contrib/impcap
 endif
 
+# mmcapture
 if ENABLE_MMCAPTURE
 SUBDIRS += contrib/mmcapture
+endif
 
 # imtuxedoulog
 if ENABLE_IMTUXEDOULOG
@@ -529,6 +531,10 @@ endif
 
 if ENABLE_IMPCAP
 DISTCHECK_CONFIGURE_FLAGS+= --enable-impcap
+endif
+
+if ENABLE_MMCAPTURE
+DISTCHECK_CONFIGURE_FLAGS+= --enable-mmcapture
 endif
 
 if ENABLE_IMDOCKER
