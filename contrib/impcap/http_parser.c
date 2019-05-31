@@ -29,9 +29,100 @@
 #include "config.h"
 #include "parsers.h"
 
-char *catch_Status_Code(char *header);
+static const char *keywords[] = {
+        "OPTIONS",
+        "GET",
+        "HEAD",
+        "POST",
+        "PUT",
+        "DELETE",
+        "TRACE",
+        "CONNECT",
+        "HTTP",
+        NULL
+};
 
-char *catch_property(char *header, char *property);
+static inline char *string_split(char **initString, const char *delimiterString) {
+    char *ret = *initString;
+
+    if(*initString) {
+        char *pos = strstr(*initString, delimiterString);
+        if(pos) {
+            *initString = pos;
+            **initString = '\0';
+            *initString += strlen(delimiterString);
+        }
+        else {
+            *initString = NULL;
+        }
+    }
+
+    return ret;
+}
+
+static inline int has_status_keyword(char *http) {
+    char *keyword, *found;
+    int i, offset;
+
+    for(i = 0, keyword = keywords[i++]; keyword = keywords[i++]; keyword != NULL) {
+        found = strstr(http, keyword);
+        if(found && (found-http) < 20 ) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+/*
+ *  This function catches HTTP header fields and status line
+ *  and adds them to the provided json object
+*/
+static inline void catch_status_and_fields(char* header, struct json_object *jparent){
+    DBGPRINTF("catch_status_and_fields\n");
+
+    struct json_object *fields = json_object_new_object();
+    size_t headerLen = strlen(header) + 1;
+    char *pHeaderCopy = malloc(headerLen);
+    char *headerCopy = pHeaderCopy;
+    memcpy(headerCopy, header, headerLen);
+
+    char *statusLine = string_split(&headerCopy, "\r\n");
+    char *firstPart, *secondPart, *thirdPart;
+    firstPart = string_split(&statusLine, " ");
+    secondPart = string_split(&statusLine, " ");
+    thirdPart = statusLine;
+    if(firstPart && secondPart && thirdPart) {
+        if(strstr(firstPart, "HTTP")) {
+            json_object_object_add(jparent, "HTTP_version", json_object_new_string(firstPart));
+            json_object_object_add(jparent, "HTTP_status_code", json_object_new_string(secondPart));
+            json_object_object_add(jparent, "HTTP_reason", json_object_new_string(thirdPart));
+        }
+        else {
+            json_object_object_add(jparent, "HTTP_method", json_object_new_string(firstPart));
+            json_object_object_add(jparent, "HTTP_request_URI", json_object_new_string(secondPart));
+            json_object_object_add(jparent, "HTTP_version", json_object_new_string(thirdPart));
+        }
+    }
+
+    char *fieldValue = string_split(&headerCopy, "\r\n");
+    char *field, *value;
+    while(fieldValue){
+        field = string_split(&fieldValue, ":");
+        value = fieldValue;
+        if(!value)  value = "";
+        while(*value == ' ') { value++; }
+
+        DBGPRINTF("got header field -> '%s': '%s'\n", field, value);
+        json_object_object_add(fields, field, json_object_new_string(value));
+        fieldValue = string_split(&headerCopy, "\r\n");
+    }
+
+    json_object_object_add(jparent, "HTTP_header_fields", fields);
+
+    free(pHeaderCopy);
+    return;
+}
 
 /*
  *  This function parses the bytes in the received packet to extract HTTP metadata.
@@ -46,72 +137,26 @@ char *catch_property(char *header, char *property);
  *  This function returns a structure containing the data unprocessed by this parser
  *  or the ones after (as a list of bytes), and the length of this data.
 */
-data_ret_t *http_parse(const uchar *packet, int pktSize, struct json_object *jparent) {
-	int oldpktSize = pktSize;
-	const uchar *old_packet = packet;
-	char *http = malloc(strlen((const char *)packet) * sizeof(char));
-	memcpy(http, packet, pktSize);
+data_ret_t* http_parse(const uchar *packet, int pktSize, struct json_object *jparent){
+    DBGPRINTF("http_parse\n");
+    DBGPRINTF("packet size %d\n", pktSize);
+    if(pktSize < 6) {
+        RETURN_DATA_AFTER(0)
+    }
 
-	while (pktSize > 0) {
-		if (packet[0] == 'H') {
-			if (packet[1] == 'T') {
-				if (packet[2] == 'T') {
-					if (packet[3] == 'P') {
-						break;
-					}
-				}
-			}
-		}
-		packet++, pktSize--;
-	}
-	if (pktSize < 6) {
-		free(http);
-		packet = old_packet;
-		pktSize = oldpktSize;
-		RETURN_DATA_AFTER(0)
-	}
+    char *pHttp = malloc(pktSize);
+    char *http = pHttp;
+    memcpy(http, packet, pktSize);
 
-	char *header = strtok(http, "\r\n\r\n");
-	json_object_object_add(jparent, "HTTP_status_code", json_object_new_string(catch_Status_Code(header)));
+    if(!has_status_keyword(http)) {
+        free(pHttp);
+        RETURN_DATA_AFTER(0)
+    }
 
+    char *header = string_split(&http, "\r\n\r\n");
 
-	char property[] = "Content-Type:";
-	char pro[] = "HTTP_content_type";
-	char *prop = catch_property(header, property);
-	if (prop != NULL) {
-		json_object_object_add(jparent, pro, json_object_new_string(prop));
-	}
-	int headerlength = strlen(header) + 4;
-	free(http);
-	RETURN_DATA_AFTER(headerlength)
-}
+    catch_status_and_fields(header, jparent);
 
-/*
- *  This function catches the HTTP status code
- *  and returns it or NULL if none was found
-*/
-char *catch_Status_Code(char *header) {
-	char *catched = malloc(strlen(header) * sizeof(char));
-	memcpy(catched,header, strlen(header));
-	strtok(catched," ");
-	char *b = strtok(NULL, " ");
-	free(catched);
-	return b;
-}
-
-/*
- *  This function catches a HTTP header property
- *  and returns it or NULL if none was found
-*/
-char *catch_property(char *header, char *property) {
-	char *catched = malloc(strlen(header) * sizeof(char));
-	memcpy(catched,header, strlen(header));
-	char *a = strtok(catched,property);
-	if (strcmp(a,catched)==0){
-		free(catched);
-		return NULL;
-	}
-	char *b = strtok(NULL, "\r\n");
-	free(catched);
-	return b;
+    free(pHttp);
+    RETURN_DATA_AFTER((int)(http - header))
 }

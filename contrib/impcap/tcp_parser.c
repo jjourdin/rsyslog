@@ -31,6 +31,7 @@
 
 #define SMB_PORT 445
 #define HTTP_PORT 80
+#define HTTP_PORT_ALT 8080
 #define FTP_PORT 21
 #define FTP_PORT_DATA 20
 
@@ -104,15 +105,16 @@ data_ret_t *tcp_parse(const uchar *packet, int pktSize, struct json_object *jpar
 	json_object_object_add(jparent, "TCP_data_length", json_object_new_int(pktSize - headerLength));
 	json_object_object_add(jparent, "net_flags", json_object_new_string(flags));
 
-	if (srcPort == SMB_PORT || dstPort == SMB_PORT) {
-		return smb_parse(packet + headerLength, pktSize - headerLength, jparent);
-	}
-	if (srcPort == FTP_PORT || dstPort == FTP_PORT || srcPort == FTP_PORT_DATA || dstPort == FTP_PORT_DATA) {
-		return ftp_parse(packet + headerLength, pktSize - headerLength, jparent);
-	}
-	if (srcPort == HTTP_PORT || dstPort == HTTP_PORT) {
-		return http_parse(packet + headerLength, pktSize - headerLength, jparent);
-	}
-	DBGPRINTF("tcp return after 20\n");
-	RETURN_DATA_AFTER(headerLength)
+    if(srcPort == SMB_PORT || dstPort == SMB_PORT) {
+        return smb_parse(packet + headerLength, pktSize - headerLength, jparent);
+    }
+    if(srcPort == FTP_PORT || dstPort == FTP_PORT || srcPort == FTP_PORT_DATA || dstPort == FTP_PORT_DATA) {
+        return ftp_parse(packet + headerLength, pktSize - headerLength, jparent);
+    }
+    if(srcPort == HTTP_PORT || dstPort == HTTP_PORT ||
+    srcPort == HTTP_PORT_ALT || dstPort == HTTP_PORT_ALT){
+        return http_parse(packet + headerLength, pktSize - headerLength, jparent);
+    }
+    DBGPRINTF("tcp return after 20\n");
+    RETURN_DATA_AFTER(headerLength)
 }
