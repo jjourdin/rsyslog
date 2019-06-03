@@ -50,6 +50,7 @@ typedef struct TCPHdr_ {
     uint16_t dport;
     uint32_t seq;
     uint32_t ack;
+    uint32_t TCPDataLength;
     char *flags;
 } TCPHdr;
 

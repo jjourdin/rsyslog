@@ -155,6 +155,11 @@ TCPHdr *getTcpHeader(struct json_object *pJson) {
         DBGPRINTF("tcph->flags: %s\n", tcph->flags);
     }
 
+    if (fjson_object_object_get_ex(pJson, "TCP_data_length", &obj)) {
+        tcph->TCPDataLength = fjson_object_get_int(obj);
+        DBGPRINTF("tcph->TCPDataLength: %u\n", tcph->TCPDataLength);
+    }
+
     DBGPRINTF("finished getting tcp header\n");
     return tcph;
 }

@@ -134,7 +134,7 @@ static inline TcpQueue *packetEnqueue(Packet *pkt) {
         strncpy(queue->tcp_flags, pkt->tcph->flags, 10);
         queue->seq = pkt->tcph->seq;
         queue->ack = pkt->tcph->ack;
-        queue->dataLength = pkt->payloadLen;
+        queue->dataLength = pkt->tcph->TCPDataLength;
         if(queue->dataLength) {
             queue->data = calloc(1, queue->dataLength);
             memmove(queue->data, pkt->payload, queue->dataLength);
@@ -153,7 +153,7 @@ int tcpSessionInitFromPacket(TcpSession *tcpSession, Packet *pkt) {
     if(pkt && tcpSession) {
         if(pkt->proto == IPPROTO_TCP && pkt->tcph) {
             char flags[10];
-            uint32_t tcpDataLength = pkt->payloadLen;
+            uint32_t tcpDataLength = pkt->tcph->TCPDataLength;
             TcpConnection *srcCon = tcpSession->cCon;
             TcpConnection *dstCon = tcpSession->sCon;
             TCPHdr *header = pkt->tcph;
