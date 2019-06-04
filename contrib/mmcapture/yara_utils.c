@@ -53,9 +53,7 @@ void yaraAddRuleToList(YaraRuleList *list, YR_RULE *rule) {
 int yaraIsRuleInList(YaraRuleList *list, YR_RULE *rule) {
     if(list && rule) {
         int i;
-        DBGPRINTF("YARA: list size: %u\n", list->fill);
         for(i = 0; i < list->fill; i++) {
-            DBGPRINTF("YARA: rule identifer -> '%s'\n", list->list[i]->identifier);
             if(strcmp(list->list[i]->identifier, rule->identifier) == 0) {
                 return 1;
             }

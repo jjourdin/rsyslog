@@ -381,7 +381,7 @@ int handleTcpFromPacket(Packet *pkt) {
 
                 if(ret == 1) return 1;
             }
-            printTcpSessionInfo(session);
+            //printTcpSessionInfo(session);
 
             return 0;
         }
