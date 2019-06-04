@@ -28,7 +28,12 @@
 #include <yara.h>
 #include <pthread.h>
 #include <time.h>
+#include <json.h>
+
 #include "rsyslog.h"
+#include "errmsg.h"
+
+#include "stream_buffer.h"
 
 #ifndef YARA_UTILS_H
 #define YARA_UTILS_H
@@ -40,6 +45,13 @@ typedef struct YaraCnf_ {
 #define YARA_CNF_RULES_ADDED 0x02
 #define YARA_CNF_RULES_COMPILED 0x04
 
+    uint8_t scanType;
+#define SCAN_TYPE_DEFAULT   0
+#define SCAN_PACKET_ONLY    0
+#define SCAN_STREAM         1
+
+    uint32_t scanMaxSize;
+#define SCAN_SIZE_DEFAULT   4096
     YR_COMPILER *compiler;
     YR_RULES    *rules;
 
@@ -63,6 +75,13 @@ typedef struct YaraStreamQueue_ {
     struct YaraStreamElem_ *tail;
 } YaraStreamQueue;
 
+typedef struct YaraRuleList_ {
+#define RULELIST_DEFAULT_INIT_SIZE   10
+    uint32_t size;
+    uint32_t fill;
+    YR_RULE **list;
+} YaraRuleList;
+
 typedef struct YaraStreamElem_ {
     uint8_t *buffer;
     uint32_t length;
@@ -75,18 +94,21 @@ typedef struct YaraStreamElem_ {
 #define YSE_RULE_MATCHED 8
 #define YSE_RULE_NOMATCH 16
 
-    YR_RULE *rule;
+    YaraRuleList *ruleList;
 
     struct YaraStreamElem_ *next;
     struct YaraStreamElem_ *prev;
 } YaraStreamElem;
 
+YaraRuleList *yaraCreateRuleList();
+void yaraAddRuleToList(YaraRuleList *, YR_RULE *);
+int yaraIsRuleInList(YaraRuleList *, YR_RULE *);
 int yaraInit(YaraCnf *);
 int yaraFin();
 void yaraStreamQueueDestroy(YaraStreamQueue *);
 int yaraAddRuleFile(FILE *, const char *, const char *);
 int yaraCompileRules();
-int yaraScanStreamElem(YaraStreamElem *, int, int);
+struct json_object *yaraScan(uint8_t *, uint32_t, StreamBuffer *);
 void yaraErrorCallback(int, const char *, int, const char *, void *);
 int yaraScanOrImportCallback(int, void *, void *);
 

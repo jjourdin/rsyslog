@@ -47,6 +47,8 @@ typedef struct StreamBuffer_ {
     uint32_t bufferSize;
     uint32_t bufferFill;
 
+    struct YaraRuleList_ *ruleList;
+
     uint32_t sbsNumber;
     StreamBufferSegment *sbsList;
 } StreamBuffer;

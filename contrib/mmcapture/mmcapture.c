@@ -93,10 +93,12 @@ static modConfData_t *runModConf = NULL;
 
 /* input instance parameters */
 static struct cnfparamdescr actpdescr[] = {
-	{ "protocol", eCmdHdlrString, 0 },
+	{ "protocol", eCmdHdlrGetWord, 0 },
     { "streamStoreFolder", eCmdHdlrString, 0 },
     { "maxConnections", eCmdHdlrPositiveInt, 0 },
-    { "yaraRuleFile", eCmdHdlrString, 0 }
+    { "yaraRuleFile", eCmdHdlrString, 0 },
+    { "yaraScanType", eCmdHdlrGetWord, 0 },
+    { "yaraScanMaxSize", eCmdHdlrPositiveInt, 0 }
 };
 
 static struct cnfparamblk actpblk = {
@@ -143,6 +145,7 @@ CODESTARTcreateInstance
     pData->protocol = NULL;
     pData->streamStoreFolder = "/var/log/rsyslog/";  /* default folder for captured files */
     pData->globalFlowCnf = calloc(1, sizeof(FlowCnf));
+    pData->globalYaraCnf = calloc(1, sizeof(YaraCnf));
 ENDcreateInstance
 
 BEGINcreateWrkrInstance
@@ -194,19 +197,36 @@ CODE_STD_STRING_REQUESTnewActInst(1)
             FILE *yaraRuleFile = fopen(yaraRuleFilename, "r");
 
             if(yaraRuleFile) {
-//                pData->globalYaraCnf->fileList = malloc(sizeof(YaraRuleFile*));
-//                pData->globalYaraCnf->fileList[0]->file = yaraRuleFile;
-//                pData->globalYaraCnf->fileList[0]->filename = yaraRuleFilename;
-//                pData->globalYaraCnf->fileListSize = 1;
                 yaraAddRuleFile(yaraRuleFile, NULL, yaraRuleFilename);
                 if(yaraCompileRules()) {
                     DBGPRINTF("error while compiling yara rules\n");
+                    ABORT_FINALIZE(RS_RET_CONFIG_ERROR);
                 }
                 else {
                     DBGPRINTF("yara rules compiled and ready\n");
                 }
             }
+        }
+        else if(!strcmp(actpblk.descr[i].name, "yaraScanType")) {
+            char *scanType = es_str2cstr(pvals[i].val.d.estr, NULL);
 
+            if(strcmp(scanType, "packet") == 0) {
+                pData->globalYaraCnf->scanType = SCAN_PACKET_ONLY;
+                DBGPRINTF("set yaraScanType to 'packet'\n");
+            }
+            else if(strcmp(scanType, "stream") == 0) {
+                pData->globalYaraCnf->scanType = SCAN_STREAM;
+                DBGPRINTF("set yaraScanType to 'stream'\n");
+            }
+            else {
+                LogError(0, RS_RET_PARAM_ERROR, "mmcapture: unhandled parameter '%s'\n"
+                "valid YARA scan types are 'packet' and 'stream'", actpblk.descr[i].name);
+                ABORT_FINALIZE(RS_RET_ERR);
+            }
+        }
+        else if(!strcmp(actpblk.descr[i].name, "yaraScanMaxSize")) {
+            pData->globalYaraCnf->scanMaxSize = (uint32_t) pvals[i].val.d.n;
+            DBGPRINTF("yaraScanMaxSize set to %u\n", pData->globalYaraCnf->scanMaxSize);
         }
         else if(!strcmp(actpblk.descr[i].name, "streamStoreFolder")) {
             char *tempFolder = es_str2cstr(pvals[i].val.d.estr, NULL);
@@ -267,55 +287,54 @@ CODESTARTdoAction
             if(ret == 1) {
                 /* session is now closed */
                 TcpSession *session = (TcpSession *) pkt->flow->protoCtx;
-                char fileNameClient[20], fileNameServeur[20];
+                char fileNameClient[20], fileNameServer[20];
                 StreamBuffer *sbClient = session->cCon->streamBuffer;
-                StreamBuffer *sbServeur = session->sCon->streamBuffer;
+                StreamBuffer *sbServer = session->sCon->streamBuffer;
                 snprintf(fileNameClient,
                 20, "tcp-%d-%d.dmp", session->flow->sp, session->flow->dp);
-                snprintf(fileNameServeur,
+                snprintf(fileNameServer,
                 20, "tcp-%d-%d.dmp", session->flow->dp, session->flow->sp);
                 FILE *tmpFileClient = openFile(pData->streamStoreFolder, fileNameClient);
-                FILE *tmpFileServeur = openFile(pData->streamStoreFolder, fileNameServeur);
+                FILE *tmpFileServer = openFile(pData->streamStoreFolder, fileNameServer);
 
-                if(tmpFileClient && tmpFileServeur) {
+                if(tmpFileClient && tmpFileServer) {
                     addDataToFile(sbClient->buffer, sbClient->bufferFill, 0, tmpFileClient);
-                    addDataToFile(sbServeur->buffer, sbServeur->bufferFill, 0, tmpFileServeur);
+                    addDataToFile(sbServer->buffer, sbServer->bufferFill, 0, tmpFileServer);
 
                     fclose(tmpFileClient);
-                    fclose(tmpFileServeur);
+                    fclose(tmpFileServer);
                 }
 
                 tcpSessionDelete(session);
                 pkt->flow->protoCtx = NULL;
             }
+
+
         }
     }
 
     if(pkt->payloadLen) {
-        YaraStreamElem *elem = calloc(1, sizeof(YaraStreamElem));
+        struct json_object *yaraMeta = NULL;
 
-        elem->buffer = pkt->payload;
-        elem->length = pkt->payloadLen;
-        elem->status |= YSE_READY;
-
-        yaraScanStreamElem(elem, 0, 1);
-
-        if(elem->rule) {
-            const char *yaraRuleTag = calloc(1, 50);
-            char tagFieldName[10];
-            int tagNum = 1;
-            struct json_object *jown = json_object_new_object();
-            YR_RULE *rule = elem->rule;
-
-            json_object_object_add(jown, "YaraMatchRule", json_object_new_string(rule->identifier));
-
-            yr_rule_tags_foreach(rule, yaraRuleTag)
-            {
-                snprintf(tagFieldName, 10, "tag%u", tagNum);
-                json_object_object_add(jown, tagFieldName, json_object_new_string(yaraRuleTag));
+        if(pData->globalYaraCnf->scanType == SCAN_STREAM &&
+        pkt->flow && pkt->proto == IPPROTO_TCP) {
+            StreamBuffer *sb;
+            TcpSession *session = (TcpSession *)pkt->flow->protoCtx;
+            if(getPacketFlowDirection(pkt->flow, pkt) == TO_SERVER) {
+                sb = session->cCon->streamBuffer;
+            }
+            else {
+                sb = session->sCon->streamBuffer;
             }
 
-            msgAddJSON(pMsg, YARA_METADATA, jown, 0, 0);
+            yaraMeta = yaraScan(pkt->payload, pkt->payloadLen, sb);
+        }
+        else if(pData->globalYaraCnf->scanType == SCAN_PACKET_ONLY){
+            yaraMeta = yaraScan(pkt->payload, pkt->payloadLen, NULL);
+        }
+
+        if(yaraMeta) {
+            msgAddJSON(pMsg, YARA_METADATA, yaraMeta, 0, 0);
         }
     }
 

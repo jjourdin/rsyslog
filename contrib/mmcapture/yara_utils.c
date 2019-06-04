@@ -26,13 +26,58 @@
 
 #include "yara_utils.h"
 
+YaraRuleList *yaraCreateRuleList() {
+    YaraRuleList *ruleList = calloc(1, sizeof(YaraRuleList));
+
+    ruleList->list = calloc(RULELIST_DEFAULT_INIT_SIZE, sizeof(YR_RULE *));
+    ruleList->size = RULELIST_DEFAULT_INIT_SIZE;
+
+    return ruleList;
+}
+
+void yaraAddRuleToList(YaraRuleList *list, YR_RULE *rule) {
+    if(list && rule) {
+        if(list->size == list->fill) {
+            list->list = (YR_RULE **)realloc((YR_RULE **)list->list, sizeof(YR_RULE *)*(list->size + RULELIST_DEFAULT_INIT_SIZE));
+            list->size += RULELIST_DEFAULT_INIT_SIZE;
+        }
+        list->list[list->fill++] = rule;
+    }
+    else {
+        DBGPRINTF("YARA: could not add rule to list, list or rull is NULL\n");
+    }
+
+    return;
+}
+
+int yaraIsRuleInList(YaraRuleList *list, YR_RULE *rule) {
+    if(list && rule) {
+        int i;
+        DBGPRINTF("YARA: list size: %u\n", list->fill);
+        for(i = 0; i < list->fill; i++) {
+            DBGPRINTF("YARA: rule identifer -> '%s'\n", list->list[i]->identifier);
+            if(strcmp(list->list[i]->identifier, rule->identifier) == 0) {
+                return 1;
+            }
+        }
+        return 0;
+    }
+    else {
+        DBGPRINTF("YARA: could not search rule in list, list or rull is NULL\n");
+    }
+}
+
 int yaraInit(YaraCnf *conf) {
+    if(!conf) {
+        DBGPRINTF("YARA: invalid yara conf passed\n");
+        return -1;
+    }
+
     if(yr_initialize()) {
         DBGPRINTF("YARA: could not initialize yara module\n");
         return -1;
     }
 
-    conf = calloc(1, sizeof(YaraCnf));
     if(yr_compiler_create(&conf->compiler)) {
         DBGPRINTF("YARA: could not create compiler, insufficient memory\n");
         return -1;
@@ -44,6 +89,9 @@ int yaraInit(YaraCnf *conf) {
         DBGPRINTF("YARA error: could not load queue for global yara config\n");
         return -1;
     }
+
+    conf->scanMaxSize = SCAN_SIZE_DEFAULT;
+    conf->scanType = SCAN_TYPE_DEFAULT;
 
     conf->status |= YARA_CNF_INIT;
     globalYaraCnf = conf;
@@ -123,13 +171,12 @@ int yaraCompileRules() {
     }
 }
 
-int yaraScanStreamElem(YaraStreamElem *elem, int fastMode, int timeout) {
+static inline int yaraScanStreamElem(YaraStreamElem *elem, int fastMode, int timeout) {
     int errNum;
     struct timespec start, stop;
 
     if(globalYaraCnf->status & YARA_CNF_RULES_COMPILED && elem->status & YSE_READY) {
 
-        DBGPRINTF("YARA launching scan_mem on %u bytes\n", elem->length);
         clock_gettime(CLOCK_MONOTONIC, &start);
         errNum = yr_rules_scan_mem(
                 globalYaraCnf->rules,
@@ -141,7 +188,7 @@ int yaraScanStreamElem(YaraStreamElem *elem, int fastMode, int timeout) {
                 timeout);
         clock_gettime(CLOCK_MONOTONIC, &stop);
 
-        DBGPRINTF("scanning time: %luus\n", (stop.tv_nsec - start.tv_nsec)/1000);
+        DBGPRINTF("YARA: scanning time: %luus\n", (stop.tv_nsec - start.tv_nsec)/1000);
 
         if(errNum) {
             switch(errNum) {
@@ -174,12 +221,95 @@ int yaraScanStreamElem(YaraStreamElem *elem, int fastMode, int timeout) {
     }
 }
 
-void yaraErrorCallback(int errorLevel, const char *fileName, int lineNumber, const char *message, void *userData) {
-    if(fileName) {
-        DBGPRINTF("YARA ERROR[%d]: on file '%s' (line %d) -> %s\n", errorLevel, fileName, lineNumber, message);
+struct json_object *yaraScan(uint8_t *buffer, uint32_t buffLen, StreamBuffer *sb) {
+    YaraStreamElem *elem = calloc(1, sizeof(YaraStreamElem));
+    elem->ruleList = yaraCreateRuleList();
+
+    if(globalYaraCnf->scanType == SCAN_PACKET_ONLY) {
+        DBGPRINTF("YARA: initializing packet scan\n");
+        if(buffer && buffLen) {
+            elem->buffer = buffer;
+            elem->length = (buffLen > globalYaraCnf->scanMaxSize) ? globalYaraCnf->scanMaxSize : buffLen;
+            elem->status |= YSE_READY;
+        }
+        else {
+            DBGPRINTF("YARA: trying to launch packet scan without providing buffer and length\n");
+            return NULL;
+        }
     }
     else {
-        DBGPRINTF("YARA ERROR[%d]: %s\n", errorLevel, message);
+        DBGPRINTF("YARA: initializing stream scan\n");
+        if(sb) {
+            if(globalYaraCnf->scanMaxSize >= sb->bufferFill) {
+                elem->buffer = sb->buffer;
+                elem->length = sb->bufferFill;
+            }
+            else {
+                DBGPRINTF("YARA: base stream buffer address: %p\n", sb->buffer);
+                DBGPRINTF("YARA: stream buffer fill: %u\n", sb->bufferFill);
+                elem->buffer = sb->buffer + sb->bufferFill - globalYaraCnf->scanMaxSize - 1;
+                elem->length = globalYaraCnf->scanMaxSize;
+            }
+            elem->status |= YSE_READY;
+        }
+        else {
+            DBGPRINTF("YARA: trying to launch stream scan without providing StreamBuffer\n");
+            return NULL;
+        }
+    }
+
+    if(elem->length) {
+        DBGPRINTF("YARA: scanning %u bytes at %p\n", elem->length, elem->buffer);
+        if(yaraScanStreamElem(elem, 0, 1)) {
+            DBGPRINTF("YARA: error while trying to launch scan\n");
+            return NULL;
+        }
+
+        if(elem->ruleList->fill) {
+            const char *yaraRuleTag = malloc(50);
+            struct json_object *rules = json_object_new_array();
+            struct json_object *ruleJson = json_object_new_object();
+            struct json_object *tagsArrayObject = json_object_new_array();
+            int i, newRules = 0;
+
+            DBGPRINTF("YARA: %u element(s) found in scan\n", elem->ruleList->fill);
+
+            if(sb && !sb->ruleList) sb->ruleList = yaraCreateRuleList();
+
+            for(i = 0; i < elem->ruleList->fill; i++) {
+                YR_RULE *rule = elem->ruleList->list[i];
+
+                if(globalYaraCnf->scanType == SCAN_STREAM && yaraIsRuleInList(sb->ruleList, rule)) {
+                    continue;
+                }
+                else {
+                    newRules = 1;
+                    if(sb)  yaraAddRuleToList(sb->ruleList, rule);
+                    json_object_object_add(ruleJson, "rule", json_object_new_string(rule->identifier));
+
+                    yr_rule_tags_foreach(rule, yaraRuleTag)
+                    {
+                        json_object_array_add(tagsArrayObject, json_object_new_string(yaraRuleTag));
+                    }
+                    json_object_object_add(ruleJson, "tags", tagsArrayObject);
+                    json_object_array_add(rules, ruleJson);
+                }
+            }
+
+            if(newRules)    return rules;
+            else            return NULL;
+        }
+    }
+
+    return NULL;
+}
+
+void yaraErrorCallback(int errorLevel, const char *fileName, int lineNumber, const char *message, void *userData) {
+    if(fileName) {
+        LogError(0, RS_RET_CONFIG_ERROR, "YARA ERROR[%d]: on file '%s' (line %d) -> %s\n", errorLevel, fileName, lineNumber, message);
+    }
+    else {
+        LogError(0, RS_RET_CONFIG_ERROR, "YARA ERROR[%d]: %s\n", errorLevel, message);
     }
 
     return;
@@ -197,7 +327,7 @@ int yaraScanOrImportCallback(int message, void *messageData, void *userData) {
             rule = (YR_RULE *)messageData;
             if(elem) {
                 elem->status |= YSE_RULE_MATCHED;
-                elem->rule = rule;
+                if(!yaraIsRuleInList(elem->ruleList, rule))  yaraAddRuleToList(elem->ruleList, rule);
             }
             DBGPRINTF("YARA SCAN: rule match -> rule '%s'\n", rule->identifier);
             break;
