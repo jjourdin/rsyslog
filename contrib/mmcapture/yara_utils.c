@@ -35,6 +35,14 @@ YaraRuleList *yaraCreateRuleList() {
     return ruleList;
 }
 
+void yaraDeleteRuleList(YaraRuleList *ruleList) {
+    if(ruleList) {
+        if(ruleList->list) free(ruleList->list);
+        free(ruleList);
+    }
+    return;
+}
+
 void yaraAddRuleToList(YaraRuleList *list, YR_RULE *rule) {
     if(list && rule) {
         if(list->size == list->fill) {
@@ -44,7 +52,7 @@ void yaraAddRuleToList(YaraRuleList *list, YR_RULE *rule) {
         list->list[list->fill++] = rule;
     }
     else {
-        DBGPRINTF("YARA: could not add rule to list, list or rull is NULL\n");
+        DBGPRINTF("YARA: could not add rule to list, list or rule is NULL\n");
     }
 
     return;
@@ -264,10 +272,8 @@ struct json_object *yaraScan(uint8_t *buffer, uint32_t buffLen, StreamBuffer *sb
         }
 
         if(elem->ruleList->fill) {
-            const char *yaraRuleTag = malloc(50);
+            const char *yaraRuleTag;
             struct json_object *rules = json_object_new_array();
-            struct json_object *ruleJson = json_object_new_object();
-            struct json_object *tagsArrayObject = json_object_new_array();
             int i, newRules = 0;
 
             DBGPRINTF("YARA: %u element(s) found in scan\n", elem->ruleList->fill);
@@ -281,6 +287,8 @@ struct json_object *yaraScan(uint8_t *buffer, uint32_t buffLen, StreamBuffer *sb
                     continue;
                 }
                 else {
+                    struct json_object *ruleJson = json_object_new_object();
+                    struct json_object *tagsArrayObject = json_object_new_array();
                     newRules = 1;
                     if(sb)  yaraAddRuleToList(sb->ruleList, rule);
                     json_object_object_add(ruleJson, "rule", json_object_new_string(rule->identifier));
@@ -299,6 +307,8 @@ struct json_object *yaraScan(uint8_t *buffer, uint32_t buffLen, StreamBuffer *sb
         }
     }
 
+    yaraDeleteRuleList(elem->ruleList);
+    free(elem);
     return NULL;
 }
 

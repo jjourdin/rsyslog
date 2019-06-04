@@ -101,6 +101,7 @@ typedef struct YaraStreamElem_ {
 } YaraStreamElem;
 
 YaraRuleList *yaraCreateRuleList();
+void yaraDeleteRuleList(YaraRuleList *);
 void yaraAddRuleToList(YaraRuleList *, YR_RULE *);
 int yaraIsRuleInList(YaraRuleList *, YR_RULE *);
 int yaraInit(YaraCnf *);

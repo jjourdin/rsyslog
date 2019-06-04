@@ -53,6 +53,7 @@ typedef struct StreamBuffer_ {
     StreamBufferSegment *sbsList;
 } StreamBuffer;
 
+void yaraDeleteRuleList(struct YaraRuleList_ *);
 
 StreamBuffer *streamBufferCreate();
 int streamBufferExtend(StreamBuffer *, uint32_t);

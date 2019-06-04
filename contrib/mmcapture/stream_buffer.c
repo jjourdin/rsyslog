@@ -57,6 +57,7 @@ void streamBufferDelete(StreamBuffer *sb) {
 
     if(sb) {
         if(sb->buffer) free(sb->buffer);
+        if(sb->ruleList) yaraDeleteRuleList(sb->ruleList);
 
         StreamBufferSegment *sbsFree, *sbs = sb->sbsList;
         while(sbs) {
