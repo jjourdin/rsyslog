@@ -82,12 +82,8 @@ static inline void catch_status_and_fields(char* header, struct json_object *jpa
     DBGPRINTF("catch_status_and_fields\n");
 
     struct json_object *fields = json_object_new_object();
-    size_t headerLen = strlen(header) + 1;
-    char *pHeaderCopy = malloc(headerLen);
-    char *headerCopy = pHeaderCopy;
-    memcpy(headerCopy, header, headerLen);
 
-    char *statusLine = string_split(&headerCopy, "\r\n");
+    char *statusLine = string_split(&header, "\r\n");
     char *firstPart, *secondPart, *thirdPart;
     firstPart = string_split(&statusLine, " ");
     secondPart = string_split(&statusLine, " ");
@@ -105,7 +101,7 @@ static inline void catch_status_and_fields(char* header, struct json_object *jpa
         }
     }
 
-    char *fieldValue = string_split(&headerCopy, "\r\n");
+    char *fieldValue = string_split(&header, "\r\n");
     char *field, *value;
     while(fieldValue){
         field = string_split(&fieldValue, ":");
@@ -115,12 +111,11 @@ static inline void catch_status_and_fields(char* header, struct json_object *jpa
 
         DBGPRINTF("got header field -> '%s': '%s'\n", field, value);
         json_object_object_add(fields, field, json_object_new_string(value));
-        fieldValue = string_split(&headerCopy, "\r\n");
+        fieldValue = string_split(&header, "\r\n");
     }
 
     json_object_object_add(jparent, "HTTP_header_fields", fields);
 
-    free(pHeaderCopy);
     return;
 }
 
@@ -144,9 +139,10 @@ data_ret_t* http_parse(const uchar *packet, int pktSize, struct json_object *jpa
         RETURN_DATA_AFTER(0)
     }
 
-    char *pHttp = malloc(pktSize);
+    char *pHttp = malloc(pktSize + 1);
     char *http = pHttp;
     memcpy(http, packet, pktSize);
+    *(http + pktSize) = '\0';
 
     if(!has_status_keyword(http)) {
         free(pHttp);
@@ -158,5 +154,10 @@ data_ret_t* http_parse(const uchar *packet, int pktSize, struct json_object *jpa
     catch_status_and_fields(header, jparent);
 
     free(pHttp);
-    RETURN_DATA_AFTER((int)(http - header))
+    if(http) {
+        RETURN_DATA_AFTER((int)(http - header))
+    }
+    else {
+        RETURN_DATA_AFTER(0)
+    }
 }
