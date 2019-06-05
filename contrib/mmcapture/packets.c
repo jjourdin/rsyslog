@@ -98,8 +98,7 @@ void printPacketInfo(Packet *pkt) {
 }
 
 Packet *createPacket() {
-    Packet *pkt = malloc(sizeof(Packet));
-    memset(pkt, 0, sizeof(Packet));
+    Packet *pkt = calloc(1, sizeof(Packet));
 
     return pkt;
 }

@@ -60,7 +60,7 @@ void yaraAddRuleToList(YaraRuleList *list, YR_RULE *rule) {
 
 int yaraIsRuleInList(YaraRuleList *list, YR_RULE *rule) {
     if(list && rule) {
-        int i;
+        uint32_t i;
         for(i = 0; i < list->fill; i++) {
             if(strcmp(list->list[i]->identifier, rule->identifier) == 0) {
                 return 1;
@@ -71,9 +71,10 @@ int yaraIsRuleInList(YaraRuleList *list, YR_RULE *rule) {
     else {
         DBGPRINTF("YARA: could not search rule in list, list or rull is NULL\n");
     }
+    return 0;
 }
 
-int yaraInit(YaraCnf *conf) {
+int yaraInitConfig(YaraCnf *conf) {
     if(!conf) {
         DBGPRINTF("YARA: invalid yara conf passed\n");
         return -1;
@@ -90,12 +91,6 @@ int yaraInit(YaraCnf *conf) {
     }
     yr_compiler_set_callback(conf->compiler, yaraErrorCallback, NULL);
 
-    conf->queue = calloc(1, sizeof(YaraStreamQueue));
-    if(!conf->queue) {
-        DBGPRINTF("YARA error: could not load queue for global yara config\n");
-        return -1;
-    }
-
     conf->scanMaxSize = SCAN_SIZE_DEFAULT;
     conf->scanType = SCAN_TYPE_DEFAULT;
 
@@ -104,36 +99,20 @@ int yaraInit(YaraCnf *conf) {
     return 0;
 }
 
-int yaraFin() {
+int yaraDeleteConfig(YaraCnf *conf) {
     if(yr_finalize()) {
         DBGPRINTF("YARA: could not finalize yara module\n");
         return -1;
     }
 
-    if(globalYaraCnf->compiler) {
-        yr_compiler_destroy(globalYaraCnf->compiler);
+    if(conf->compiler) {
+        yr_compiler_destroy(conf->compiler);
     }
-    if(globalYaraCnf->rules) {
-        yr_rules_destroy(globalYaraCnf->rules);
-    }
-    if(globalYaraCnf->queue) {
-        yaraStreamQueueDestroy(globalYaraCnf->queue);
+    if(conf->rules) {
+        yr_rules_destroy(conf->rules);
     }
 
     return 0;
-}
-
-void yaraStreamQueueDestroy(YaraStreamQueue *queue) {
-    YaraStreamElem *queueElem = queue->head;
-    YaraStreamElem *destroy;
-
-    while(queueElem) {
-        destroy = queueElem;
-        queueElem = queueElem->next;
-        free(destroy);
-    }
-
-    return;
 }
 
 int yaraAddRuleFile(FILE *file, const char *namespace, const char *fileName) {
@@ -274,7 +253,7 @@ struct json_object *yaraScan(uint8_t *buffer, uint32_t buffLen, StreamBuffer *sb
         if(elem->ruleList->fill) {
             const char *yaraRuleTag;
             struct json_object *rules = json_object_new_array();
-            int i, newRules = 0;
+            uint32_t i, newRules = 0;
 
             DBGPRINTF("YARA: %u element(s) found in scan\n", elem->ruleList->fill);
 

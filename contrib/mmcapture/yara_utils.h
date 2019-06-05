@@ -54,26 +54,9 @@ typedef struct YaraCnf_ {
 #define SCAN_SIZE_DEFAULT   4096
     YR_COMPILER *compiler;
     YR_RULES    *rules;
-
-    char *rulesDir;
-    struct YaraRuleFile_ **fileList;
-    uint8_t fileListSize;
-
-    struct YaraStreamQueue_ *queue;
 } YaraCnf;
 
 YaraCnf *globalYaraCnf;
-
-typedef struct YaraRuleFile_ {
-    char *filename;
-    FILE *file;
-} YaraRuleFile;
-
-typedef struct YaraStreamQueue_ {
-    uint32_t queueSize;
-    struct YaraStreamElem_ *head;
-    struct YaraStreamElem_ *tail;
-} YaraStreamQueue;
 
 typedef struct YaraRuleList_ {
 #define RULELIST_DEFAULT_INIT_SIZE   10
@@ -104,9 +87,8 @@ YaraRuleList *yaraCreateRuleList();
 void yaraDeleteRuleList(YaraRuleList *);
 void yaraAddRuleToList(YaraRuleList *, YR_RULE *);
 int yaraIsRuleInList(YaraRuleList *, YR_RULE *);
-int yaraInit(YaraCnf *);
-int yaraFin();
-void yaraStreamQueueDestroy(YaraStreamQueue *);
+int yaraInitConfig(YaraCnf *);
+int yaraDeleteConfig();
 int yaraAddRuleFile(FILE *, const char *, const char *);
 int yaraCompileRules();
 struct json_object *yaraScan(uint8_t *, uint32_t, StreamBuffer *);

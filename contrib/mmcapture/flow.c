@@ -48,6 +48,16 @@ static inline Flow *createNewFlow() {
     return flow;
 }
 
+void deleteFlow(Flow *flow) {
+    if(flow) {
+        pthread_mutex_destroy(&(flow->mLock));
+        if(flow->protoCtx) free(flow->protoCtx);
+        free(flow);
+    }
+
+    return;
+}
+
 static inline FlowList *initNewFlowList() {
     DBGPRINTF("initNewFlowList\n")
 
@@ -61,6 +71,29 @@ static inline FlowList *initNewFlowList() {
     }
 
     return NULL;
+}
+
+static inline void deleteFlowListElems(FlowList *flowList) {
+    if(flowList) {
+        Flow *delete, *flow = flowList->head;
+        while(flow) {
+            delete = flow;
+            flow = flow->nextFlow;
+            deleteFlow(delete);
+        }
+
+        flowList->listSize = 0;
+    }
+
+    return;
+}
+
+static inline void deleteFlowList(FlowList *flowList) {
+    if(flowList) {
+        pthread_mutex_destroy(&(flowList->mLock));
+        free(flowList);
+    }
+    return ;
 }
 
 static inline int addFlowToList(Flow *flow, FlowList *flowList) {
@@ -135,7 +168,6 @@ static inline int removeFlowFromList(Flow *flow, FlowList *flowList) {
 void flowInitConfig(FlowCnf *conf) {
     DBGPRINTF("init flow config, conf addr: %p\n", conf);
     memset(conf, 0, sizeof(FlowCnf));
-    DBGPRINTF("memset done\n");
 
     conf->hash_rand = (uint32_t) getRandom();
     conf->hash_size = FLOW_DEFAULT_HASHSIZE;
@@ -153,6 +185,23 @@ void flowInitConfig(FlowCnf *conf) {
     }
 
     globalFlowCnf = conf;
+    return;
+}
+
+void flowDeleteConfig(FlowCnf *conf) {
+    if(conf) {
+        if(conf->flowList)  {
+            deleteFlowListElems(conf->flowList);
+            deleteFlowList(conf->flowList);
+        }
+        uint32_t i;
+        for(i = 0; i < conf->hash_size; i++) {
+            deleteFlowList(conf->flowHashLists[i]);
+        }
+        free(conf->flowHashLists);
+
+        free(conf);
+    }
     return;
 }
 
@@ -295,6 +344,7 @@ int getPacketFlowDirection(Flow *flow, Packet *pkt) {
     else if(pkt->proto == IPPROTO_ICMP || pkt->proto == IPPROTO_ICMPV6) {
         return getFlowDirectionFromAddrs(flow, &pkt->src, &pkt->dst);
     }
+    return -1;
 }
 
 void printFlowInfo(Flow *flow) {
@@ -319,8 +369,8 @@ void printFlowInfo(Flow *flow) {
     DBGPRINTF("flow->protoCtx: %p\n", flow->protoCtx);
     DBGPRINTF("flow->toDstPktCnt: %u\n", flow->toDstPktCnt);
     DBGPRINTF("flow->toSrcPktCnt: %u\n", flow->toSrcPktCnt);
-    DBGPRINTF("flow->toDstByteCnt: %u\n", flow->toDstByteCnt);
-    DBGPRINTF("flow->toSrcByteCnt: %u\n", flow->toSrcByteCnt);
+    DBGPRINTF("flow->toDstByteCnt: %lu\n", flow->toDstByteCnt);
+    DBGPRINTF("flow->toSrcByteCnt: %lu\n", flow->toSrcByteCnt);
     DBGPRINTF("flow->prevFlow: %p\n", flow->prevFlow);
     DBGPRINTF("flow->nextFlow: %p\n", flow->nextFlow);
 

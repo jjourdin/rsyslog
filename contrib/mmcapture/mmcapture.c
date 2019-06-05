@@ -38,15 +38,15 @@
 #include <ctype.h>
 #include <json.h>
 #include <sys/types.h>
-#include "rsyslog.h"
 
+#include "rsyslog.h"
 #include "errmsg.h"
 #include "unicode-helper.h"
 #include "module-template.h"
 #include "rainerscript.h"
 #include "rsconf.h"
-#include "packets.h"
 
+#include "packets.h"
 #include "file_utils.h"
 #include "tcp_sessions.h"
 #include "flow.h"
@@ -65,16 +65,9 @@ DEF_OMOD_STATIC_DATA
 
 #define YARA_METADATA   "!yara"
 
-static char* proto_list[] = {
-    "http",
-    "ftp",
-    "smb"
-};
-
 /* conf structures */
 
 typedef struct instanceData_s {
-    char* protocol;
     char* streamStoreFolder;
     FlowCnf *globalFlowCnf;
     YaraCnf *globalYaraCnf;
@@ -93,7 +86,6 @@ static modConfData_t *runModConf = NULL;
 
 /* input instance parameters */
 static struct cnfparamdescr actpdescr[] = {
-	{ "protocol", eCmdHdlrGetWord, 0 },
     { "streamStoreFolder", eCmdHdlrString, 0 },
     { "maxConnections", eCmdHdlrPositiveInt, 0 },
     { "yaraRuleFile", eCmdHdlrString, 0 },
@@ -142,8 +134,8 @@ ENDfreeCnf
 BEGINcreateInstance
     DBGPRINTF("entering createInstance\n");
 CODESTARTcreateInstance
-    pData->protocol = NULL;
-    pData->streamStoreFolder = "/var/log/rsyslog/";  /* default folder for captured files */
+    pData->streamStoreFolder = malloc(50);
+    strncpy(pData->streamStoreFolder, "/var/log/rsyslog/", 18);  /* default folder for captured files */
     pData->globalFlowCnf = calloc(1, sizeof(FlowCnf));
     pData->globalYaraCnf = calloc(1, sizeof(YaraCnf));
 ENDcreateInstance
@@ -156,6 +148,9 @@ ENDcreateWrkrInstance
 BEGINfreeInstance
     DBGPRINTF("entering freeInstance\n");
 CODESTARTfreeInstance
+    free(pData->streamStoreFolder);
+    flowDeleteConfig(pData->globalFlowCnf);
+    yaraDeleteConfig(pData->globalYaraCnf);
 ENDfreeInstance
 
 BEGINfreeWrkrInstance
@@ -177,16 +172,12 @@ CODE_STD_STRING_REQUESTnewActInst(1)
     CHKiRet(createInstance(&pData));
 
     flowInitConfig(pData->globalFlowCnf);
-    yaraInit(pData->globalYaraCnf);
+    yaraInitConfig(pData->globalYaraCnf);
 
     for(i = 0; i < actpblk.nParams; ++i) {
         if(!pvals[i].bUsed)
             continue;
 
-        if(!strcmp(actpblk.descr[i].name, "protocol")) {
-            pData->protocol = es_str2cstr(pvals[i].val.d.estr, NULL);
-            DBGPRINTF("protocol set to '%s'\n", pData->protocol);
-        }
         else if(!strcmp(actpblk.descr[i].name, "maxConnections")) {
             pData->globalFlowCnf->maxFlow = (uint32_t) pvals[i].val.d.n;
             DBGPRINTF("maxConnections set to %u\n", globalFlowCnf->maxFlow);
@@ -195,9 +186,11 @@ CODE_STD_STRING_REQUESTnewActInst(1)
             char *yaraRuleFilename = es_str2cstr(pvals[i].val.d.estr, NULL);
             DBGPRINTF("adding file '%s' to yara compilation\n", yaraRuleFilename);
             FILE *yaraRuleFile = fopen(yaraRuleFilename, "r");
+            free(yaraRuleFilename);
 
             if(yaraRuleFile) {
                 yaraAddRuleFile(yaraRuleFile, NULL, yaraRuleFilename);
+                fclose(yaraRuleFile);
                 if(yaraCompileRules()) {
                     DBGPRINTF("error while compiling yara rules\n");
                     ABORT_FINALIZE(RS_RET_CONFIG_ERROR);
@@ -219,10 +212,12 @@ CODE_STD_STRING_REQUESTnewActInst(1)
                 DBGPRINTF("set yaraScanType to 'stream'\n");
             }
             else {
+                free(scanType);
                 LogError(0, RS_RET_PARAM_ERROR, "mmcapture: unhandled parameter '%s'\n"
                 "valid YARA scan types are 'packet' and 'stream'", actpblk.descr[i].name);
                 ABORT_FINALIZE(RS_RET_ERR);
             }
+            free(scanType);
         }
         else if(!strcmp(actpblk.descr[i].name, "yaraScanMaxSize")) {
             pData->globalYaraCnf->scanMaxSize = (uint32_t) pvals[i].val.d.n;
@@ -231,7 +226,7 @@ CODE_STD_STRING_REQUESTnewActInst(1)
         else if(!strcmp(actpblk.descr[i].name, "streamStoreFolder")) {
             char *tempFolder = es_str2cstr(pvals[i].val.d.estr, NULL);
             char *finalFolder;
-            uint8_t *pChar = tempFolder;
+            char *pChar = tempFolder;
             uint32_t size = 1;
             while(*pChar != '\0') { pChar++; size++; }
             if(*--pChar != '/') {
@@ -239,11 +234,13 @@ CODE_STD_STRING_REQUESTnewActInst(1)
                 memcpy(finalFolder, tempFolder, size);
                 finalFolder[size - 1] = '/';
                 finalFolder[size] = '\0';
+                free(tempFolder);
             }
             else {
                 finalFolder = tempFolder;
             }
 
+            free(pData->streamStoreFolder); /* freeing old allocated memory */
             pData->streamStoreFolder = finalFolder;
 
             DBGPRINTF("streamStoreFolder set to '%s'\n", pData->streamStoreFolder);
@@ -298,12 +295,12 @@ CODESTARTdoAction
                 FILE *tmpFileServer = openFile(pData->streamStoreFolder, fileNameServer);
 
                 if(tmpFileClient && tmpFileServer) {
-                    addDataToFile(sbClient->buffer, sbClient->bufferFill, 0, tmpFileClient);
-                    addDataToFile(sbServer->buffer, sbServer->bufferFill, 0, tmpFileServer);
-
-                    fclose(tmpFileClient);
-                    fclose(tmpFileServer);
+                    addDataToFile((char *)sbClient->buffer, sbClient->bufferFill, 0, tmpFileClient);
+                    addDataToFile((char *)sbServer->buffer, sbServer->bufferFill, 0, tmpFileServer);
                 }
+
+                if(tmpFileClient)   fclose(tmpFileClient);
+                if(tmpFileServer)   fclose(tmpFileServer);
 
                 tcpSessionDelete(session);
                 pkt->flow->protoCtx = NULL;
@@ -334,7 +331,7 @@ CODESTARTdoAction
         }
 
         if(yaraMeta) {
-            msgAddJSON(pMsg, YARA_METADATA, yaraMeta, 0, 0);
+            msgAddJSON(pMsg, (unsigned char *)YARA_METADATA, yaraMeta, 0, 0);
         }
     }
 
