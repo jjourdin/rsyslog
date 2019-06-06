@@ -154,10 +154,5 @@ data_ret_t* http_parse(const uchar *packet, int pktSize, struct json_object *jpa
     catch_status_and_fields(header, jparent);
 
     free(pHttp);
-    if(http) {
-        RETURN_DATA_AFTER((int)(http - header))
-    }
-    else {
-        RETURN_DATA_AFTER(0)
-    }
+    RETURN_DATA_AFTER(0)
 }
