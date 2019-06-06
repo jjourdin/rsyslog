@@ -68,7 +68,7 @@ DEF_OMOD_STATIC_DATA
 /* conf structures */
 
 typedef struct instanceData_s {
-    char* streamStoreFolder;
+    StreamsCnf *globalStreamsCnf;
     FlowCnf *globalFlowCnf;
     YaraCnf *globalYaraCnf;
 } instanceData;
@@ -134,8 +134,7 @@ ENDfreeCnf
 BEGINcreateInstance
     DBGPRINTF("entering createInstance\n");
 CODESTARTcreateInstance
-    pData->streamStoreFolder = malloc(50);
-    strncpy(pData->streamStoreFolder, "/var/log/rsyslog/", 18);  /* default folder for captured files */
+    pData->globalStreamsCnf = calloc(1, sizeof(StreamsCnf));
     pData->globalFlowCnf = calloc(1, sizeof(FlowCnf));
     pData->globalYaraCnf = calloc(1, sizeof(YaraCnf));
 ENDcreateInstance
@@ -148,7 +147,7 @@ ENDcreateWrkrInstance
 BEGINfreeInstance
     DBGPRINTF("entering freeInstance\n");
 CODESTARTfreeInstance
-    free(pData->streamStoreFolder);
+    streamDeleteConfig(pData->globalStreamsCnf);
     flowDeleteConfig(pData->globalFlowCnf);
     yaraDeleteConfig(pData->globalYaraCnf);
 ENDfreeInstance
@@ -173,6 +172,7 @@ CODE_STD_STRING_REQUESTnewActInst(1)
 
     flowInitConfig(pData->globalFlowCnf);
     yaraInitConfig(pData->globalYaraCnf);
+    streamInitConfig(pData->globalStreamsCnf);
 
     for(i = 0; i < actpblk.nParams; ++i) {
         if(!pvals[i].bUsed)
@@ -186,11 +186,12 @@ CODE_STD_STRING_REQUESTnewActInst(1)
             char *yaraRuleFilename = es_str2cstr(pvals[i].val.d.estr, NULL);
             DBGPRINTF("adding file '%s' to yara compilation\n", yaraRuleFilename);
             FILE *yaraRuleFile = fopen(yaraRuleFilename, "r");
-            free(yaraRuleFilename);
 
             if(yaraRuleFile) {
                 yaraAddRuleFile(yaraRuleFile, NULL, yaraRuleFilename);
                 fclose(yaraRuleFile);
+                free(yaraRuleFilename);
+
                 if(yaraCompileRules()) {
                     DBGPRINTF("error while compiling yara rules\n");
                     ABORT_FINALIZE(RS_RET_CONFIG_ERROR);
@@ -240,10 +241,10 @@ CODE_STD_STRING_REQUESTnewActInst(1)
                 finalFolder = tempFolder;
             }
 
-            free(pData->streamStoreFolder); /* freeing old allocated memory */
-            pData->streamStoreFolder = finalFolder;
+            free(pData->globalStreamsCnf->streamStoreFolder); /* freeing old allocated memory */
+            pData->globalStreamsCnf->streamStoreFolder = finalFolder;
 
-            DBGPRINTF("streamStoreFolder set to '%s'\n", pData->streamStoreFolder);
+            DBGPRINTF("streamStoreFolder set to '%s'\n", pData->globalStreamsCnf->streamStoreFolder);
 
         }
         else {
@@ -251,8 +252,10 @@ CODE_STD_STRING_REQUESTnewActInst(1)
         }
     }
 
-    if(createFolder(pData->streamStoreFolder)){
-        ABORT_FINALIZE(RS_RET_ERR);
+    if(createFolder(pData->globalStreamsCnf->streamStoreFolder) != 0){
+        LogError(0, RS_RET_CONFIG_ERROR, "error while creating folder '%s' for stream dumps,"
+                                         " streams won't be dumped", pData->globalStreamsCnf->streamStoreFolder);
+        free(pData->globalStreamsCnf->streamStoreFolder);
     }
 
 CODE_STD_FINALIZERnewActInst
@@ -284,23 +287,6 @@ CODESTARTdoAction
             if(ret == 1) {
                 /* session is now closed */
                 TcpSession *session = (TcpSession *) pkt->flow->protoCtx;
-                char fileNameClient[20], fileNameServer[20];
-                StreamBuffer *sbClient = session->cCon->streamBuffer;
-                StreamBuffer *sbServer = session->sCon->streamBuffer;
-                snprintf(fileNameClient,
-                20, "tcp-%d-%d.dmp", session->flow->sp, session->flow->dp);
-                snprintf(fileNameServer,
-                20, "tcp-%d-%d.dmp", session->flow->dp, session->flow->sp);
-                FILE *tmpFileClient = openFile(pData->streamStoreFolder, fileNameClient);
-                FILE *tmpFileServer = openFile(pData->streamStoreFolder, fileNameServer);
-
-                if(tmpFileClient && tmpFileServer) {
-                    addDataToFile((char *)sbClient->buffer, sbClient->bufferFill, 0, tmpFileClient);
-                    addDataToFile((char *)sbServer->buffer, sbServer->bufferFill, 0, tmpFileServer);
-                }
-
-                if(tmpFileClient)   fclose(tmpFileClient);
-                if(tmpFileServer)   fclose(tmpFileServer);
 
                 tcpSessionDelete(session);
                 pkt->flow->protoCtx = NULL;

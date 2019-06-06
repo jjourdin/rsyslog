@@ -228,11 +228,9 @@ int tcpConnectionsUpdateFromQueueElem(TcpConnection *srcCon, TcpConnection *dstC
 
         if(tcpDataLength) {
             uint32_t dataLength = tcpDataLength;
-            DBGPRINTF("data to get offset -> queue->seq: %u, srcCon->initSeq: %u\n", queue->seq, srcCon->initSeq);
             uint32_t offset = queue->seq - srcCon->initSeq - 1 /* SYN packet = seq+1 but no data */;
-            if(srcCon->state > TCP_ESTABLISHED) {
+            if(srcCon->state > TCP_ESTABLISHED && offset > 0) {
                 offset--; /* FIN packet = seq+1 but no data */
-                DBGPRINTF("offset reduced as tcp state over established\n")
             }
 
             streamBufferAddDataSegment(srcCon->streamBuffer, offset, dataLength, queue->data);
@@ -377,6 +375,19 @@ int handleTcpFromPacket(Packet *pkt) {
                         tcpQueueRemoveFromConnection(srcCon, tcpQueue);
                         tcpQueue = tcpConnectionGetNextInQueue(srcCon);
                     }while(tcpQueue && !ret);
+                }
+
+                if(srcCon->state >= TCP_ESTABLISHED &&
+                dstCon->state >= TCP_ESTABLISHED &&
+                (!srcCon->streamBuffer->bufferDump || !dstCon->streamBuffer->bufferDump)) {
+                    char fileNameClient[20], fileNameServer[20];
+                    snprintf(fileNameClient,
+                             20, "tcp-%d-%d.dmp", session->flow->sp, session->flow->dp);
+                    snprintf(fileNameServer,
+                             20, "tcp-%d-%d.dmp", session->flow->dp, session->flow->sp);
+
+                    linkStreamBufferToDumpFile(session->cCon->streamBuffer, fileNameClient);
+                    linkStreamBufferToDumpFile(session->sCon->streamBuffer, fileNameServer);
                 }
 
                 if(ret == 1) return 1;

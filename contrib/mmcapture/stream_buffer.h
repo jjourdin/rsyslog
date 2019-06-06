@@ -32,9 +32,18 @@
 #include <string.h>
 
 #include "rsyslog.h"
+#include "file_utils.h"
 
 #define DEFAULT_BUFF_START_SIZE     4096
 #define BUFF_ADD_BLOCK_SIZE         4096
+
+typedef struct StreamsCnf_ {
+    char *streamStoreFolder;
+    uint32_t streamNumber;
+    struct StreamBuffer_ *listHead;
+} StreamsCnf;
+
+extern StreamsCnf *streamsCnf;
 
 typedef struct StreamBufferSegment_ {
     uint32_t length;
@@ -51,10 +60,19 @@ typedef struct StreamBuffer_ {
 
     uint32_t sbsNumber;
     StreamBufferSegment *sbsList;
+
+    FILE *bufferDump;
+
+    struct StreamBuffer_ *next;
+    struct StreamBuffer_ *prev;
 } StreamBuffer;
 
 void yaraDeleteRuleList(struct YaraRuleList_ *);
 
+void streamInitConfig(StreamsCnf *);
+void streamDeleteConfig(StreamsCnf *);
+int linkStreamBufferToDumpFile(StreamBuffer *, char *);
+uint32_t streamBufferDumpToFile(StreamBuffer *);
 StreamBuffer *streamBufferCreate();
 int streamBufferExtend(StreamBuffer *, uint32_t);
 void streamBufferDelete(StreamBuffer *);

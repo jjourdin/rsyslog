@@ -26,7 +26,37 @@
 
 #include "stream_buffer.h"
 
+StreamsCnf *streamsCnf;
+
+static inline void addBufferToConfList(StreamBuffer *buffer) {
+    DBGPRINTF("addBufferToConfList\n");
+
+    if(streamsCnf->listHead) {
+        buffer->next = streamsCnf->listHead;
+        streamsCnf->listHead->prev = buffer;
+        buffer->prev = NULL;
+    }
+    else {
+        buffer->next = NULL;
+        buffer->prev = NULL;
+    }
+    streamsCnf->listHead = buffer;
+    streamsCnf->streamNumber++;
+    return;
+}
+
+static inline void removeBufferFromConfList(StreamBuffer *buffer) {
+    DBGPRINTF("removeBufferFromConfList\n");
+
+    if(buffer->prev) buffer->prev->next = buffer->next;
+    if(buffer->next) buffer->next->prev = buffer->prev;
+    if(streamsCnf->listHead == buffer) streamsCnf->listHead = buffer->next;
+    streamsCnf->streamNumber--;
+}
+
 static inline int initBuffer(StreamBuffer *sb) {
+    DBGPRINTF("initBuffer\n");
+
     sb->buffer = calloc(1, DEFAULT_BUFF_START_SIZE);
 
     if(sb->buffer) {
@@ -37,12 +67,66 @@ static inline int initBuffer(StreamBuffer *sb) {
     return -1;
 }
 
+void streamInitConfig(StreamsCnf *conf) {
+    DBGPRINTF("streamInitConfig\n");
+    memset(conf, 0, sizeof(StreamsCnf));
+
+    conf->streamStoreFolder = malloc(256);
+    strncpy(conf->streamStoreFolder, "/var/log/rsyslog/mmcapture-streams/", 256);
+
+    streamsCnf = conf;
+    return;
+}
+
+void streamDeleteConfig(StreamsCnf *conf) {
+    DBGPRINTF("streamDeleteConfig\n");
+
+    StreamBuffer *delete, *sb = streamsCnf->listHead;
+    while(sb) {
+        delete = sb;
+        sb = sb->next;
+        streamBufferDelete(delete);
+    }
+    if(conf->streamStoreFolder) free(conf->streamStoreFolder);
+    free(conf);
+}
+
+int linkStreamBufferToDumpFile(StreamBuffer *sb, char *filename) {
+    DBGPRINTF("linkStreamBufferToDumpFile\n");
+
+    if(streamsCnf->streamStoreFolder) {
+        DBGPRINTF("linking file '%s' to stream buffer\n", filename);
+        FILE *opened = openFile(streamsCnf->streamStoreFolder, filename);
+        if(!opened) return -1;
+
+        sb->bufferDump = opened;
+    }
+    return 0;
+}
+
+uint32_t streamBufferDumpToFile(StreamBuffer *sb) {
+    DBGPRINTF("streamBufferDumpToFile\n");
+    uint32_t writeAmount = 0;
+
+    if(sb->bufferDump) {
+        StreamBufferSegment *sbs = sb->sbsList;
+        while(sbs) {
+            addDataToFile((char *)(sb->buffer + sbs->streamOffset), sbs->length, sbs->streamOffset, sb->bufferDump);
+            writeAmount += sbs->length;
+            sbs = sbs->next;
+        }
+    }
+
+    return writeAmount;
+}
+
 StreamBuffer *streamBufferCreate() {
     DBGPRINTF("streamBufferCreate\n");
 
     StreamBuffer *sb = calloc(1, sizeof(StreamBuffer));
     if(sb) {
         if(initBuffer(sb) == 0) {
+            addBufferToConfList(sb);
             return sb;
         }
 
@@ -56,6 +140,13 @@ void streamBufferDelete(StreamBuffer *sb) {
     DBGPRINTF("streamBufferDelete\n");
 
     if(sb) {
+        removeBufferFromConfList(sb);
+
+        if(sb->bufferDump) {
+            streamBufferDumpToFile(sb);
+            fclose(sb->bufferDump);
+        }
+
         if(sb->buffer) free(sb->buffer);
         if(sb->ruleList) yaraDeleteRuleList(sb->ruleList);
 
@@ -85,7 +176,7 @@ int streamBufferExtend(StreamBuffer *sb, uint32_t extLength) {
             return 0;
         }
         else {
-            DBGPRINTF("error while extending stream buffer\n")
+            DBGPRINTF("error while extending stream buffer\n");
         }
     }
     else {
@@ -96,8 +187,7 @@ int streamBufferExtend(StreamBuffer *sb, uint32_t extLength) {
 }
 
 int streamBufferAddDataSegment(StreamBuffer *sb, uint32_t offset, uint32_t dataLength, uint8_t *data) {
-    DBGPRINTF("streamBufferAddDataSegment\n"
-              "offset: %u, dataLength: %u, buffer: %p, data: %p\n", offset, dataLength, sb, data);
+    DBGPRINTF("streamBufferAddDataSegment offset: %u, dataLength: %u\n", offset, dataLength);
 
     if(sb) {
         uint32_t bufferSize = sb->bufferSize;
@@ -109,13 +199,13 @@ int streamBufferAddDataSegment(StreamBuffer *sb, uint32_t offset, uint32_t dataL
 
         // add data to buffer
         memmove(sb->buffer + offset, data, dataLength);
-        sb->bufferFill = offset+dataLength;
+        sb->bufferFill = (offset+dataLength > sb->bufferFill) ? offset+dataLength : sb->bufferFill;
 
         StreamBufferSegment *sbs = calloc(1, sizeof(StreamBufferSegment));
         sbs->streamOffset = offset;
         sbs->length = dataLength;
-        sbs->next = sb->sbsList;
 
+        sbs->next = sb->sbsList;
         sb->sbsList = sbs;
         sb->sbsNumber++;
 
