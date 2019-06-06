@@ -47,6 +47,7 @@ Packet *getImpcapData(smsg_t *pMsg) {
 
         if(fjson_object_object_get_ex(pJson, "ID", &obj)) {
             pkt->pktNumber = fjson_object_get_int(obj);
+            DBGPRINTF("packet number: %d\n", pkt->pktNumber);
         }
 
         if (fjson_object_object_get_ex(pJson, "ETH_type", &obj)) {
@@ -127,17 +128,16 @@ char *ImpcapDataDecode(char *hex, uint32_t length) {
 TCPHdr *getTcpHeader(struct json_object *pJson) {
     DBGPRINTF("getting tcp header\n");
     struct json_object *obj = NULL;
-    TCPHdr *tcph = malloc(sizeof(TCPHdr));
-    memset(tcph, 0, sizeof(TCPHdr));
+    TCPHdr *tcph = calloc(1, sizeof(TCPHdr));
 
     if (fjson_object_object_get_ex(pJson, "net_src_port", &obj)) {
         tcph->sport = fjson_object_get_int(obj);
-        DBGPRINTF("tcph->sport: %u\n", tcph->dport);
+        DBGPRINTF("tcph->sport: %u\n", tcph->sport);
     }
 
     if (fjson_object_object_get_ex(pJson, "net_dst_port", &obj)) {
         tcph->dport = fjson_object_get_int(obj);
-        DBGPRINTF("tcph->dport: %u\n", tcph->sport);
+        DBGPRINTF("tcph->dport: %u\n", tcph->dport);
     }
 
     if (fjson_object_object_get_ex(pJson, "TCP_seq_number", &obj)) {
@@ -155,7 +155,7 @@ TCPHdr *getTcpHeader(struct json_object *pJson) {
         DBGPRINTF("tcph->flags: %s\n", tcph->flags);
     }
 
-    if (fjson_object_object_get_ex(pJson, "TCP_data_length", &obj)) {
+    if (fjson_object_object_get_ex(pJson, "net_bytes_data", &obj)) {
         tcph->TCPDataLength = fjson_object_get_int(obj);
         DBGPRINTF("tcph->TCPDataLength: %u\n", tcph->TCPDataLength);
     }
@@ -192,6 +192,7 @@ IPV6Hdr *getIpv6Header(struct json_object *pJson) {
 
     if (fjson_object_object_get_ex(pJson, "IP_proto", &obj)) {
         ipv6h->proto = fjson_object_get_int(obj);
+        DBGPRINTF("ip6h->proto: %d\n", ipv6h->proto);
     }
 
     return ipv6h;
@@ -205,22 +206,27 @@ IPV4Hdr *getIpv4Header(struct json_object *pJson) {
 
     if (fjson_object_object_get_ex(pJson, "net_dst_ip", &obj)) {
         ipv4h->dst = fjson_object_get_string(obj);
+        DBGPRINTF("ip4h->dst: %s\n", ipv4h->dst);
     }
 
     if (fjson_object_object_get_ex(pJson, "net_src_ip", &obj)) {
         ipv4h->src = fjson_object_get_string(obj);
+        DBGPRINTF("ip4h->src: %s\n", ipv4h->src);
     }
 
     if (fjson_object_object_get_ex(pJson, "IP_ihl", &obj)) {
         ipv4h->hLen = fjson_object_get_int(obj);
+        DBGPRINTF("ip4h->hLen: %d\n", ipv4h->hLen);
     }
 
     if (fjson_object_object_get_ex(pJson, "net_ttl", &obj)) {
         ipv4h->ttl = fjson_object_get_int(obj);
+        DBGPRINTF("ip4h->ttl: %d\n", ipv4h->ttl);
     }
 
     if (fjson_object_object_get_ex(pJson, "IP_proto", &obj)) {
         ipv4h->proto = fjson_object_get_int(obj);
+        DBGPRINTF("ip4h->proto: %d\n", ipv4h->proto);
     }
 
     return ipv4h;
