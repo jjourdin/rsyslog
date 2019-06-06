@@ -102,7 +102,6 @@ data_ret_t *tcp_parse(const uchar *packet, int pktSize, struct json_object *jpar
 	json_object_object_add(jparent, "net_dst_port", json_object_new_int(dstPort));
 	json_object_object_add(jparent, "TCP_seq_number", json_object_new_int64(ntohl(tcp_header->seq)));
 	json_object_object_add(jparent, "TCP_ack_number", json_object_new_int64(ntohl(tcp_header->ack)));
-	json_object_object_add(jparent, "TCP_data_length", json_object_new_int(pktSize - headerLength));
 	json_object_object_add(jparent, "net_flags", json_object_new_string(flags));
 
     if(srcPort == SMB_PORT || dstPort == SMB_PORT) {
@@ -115,6 +114,6 @@ data_ret_t *tcp_parse(const uchar *packet, int pktSize, struct json_object *jpar
     srcPort == HTTP_PORT_ALT || dstPort == HTTP_PORT_ALT){
         return http_parse(packet + headerLength, pktSize - headerLength, jparent);
     }
-    DBGPRINTF("tcp return after 20\n");
+    DBGPRINTF("tcp return after header length (%u)\n", headerLength);
     RETURN_DATA_AFTER(headerLength)
 }
