@@ -87,20 +87,23 @@ data_ret_t *smb_parse(const uchar *packet, int pktSize, struct json_object *jpar
 	DBGPRINTF("smb_parse\n");
 	DBGPRINTF("packet size %d\n", pktSize);
 
-	while (pktSize > 0) {
-		/* don't check packet[0] to include SMB version byte at the beginning */
-		if (packet[1] == 'S') {
-			if (packet[2] == 'M') {
-				if (packet[3] == 'B') {
+	int pktSizeCpy = pktSize;
+	uchar *packetCpy = packet;
+
+	while (pktSizeCpy > 0) {
+		/* don't check packetCpy[0] to include SMB version byte at the beginning */
+		if (packetCpy[1] == 'S') {
+			if (packetCpy[2] == 'M') {
+				if (packetCpy[3] == 'B') {
 					break;
 				}
 			}
 		}
-		packet++, pktSize--;
+		packetCpy++, pktSizeCpy--;
 	}
 
-	if ((int) pktSize < 64) {
-		DBGPRINTF("SMB packet too small : %d\n", pktSize);
+	if ((int) pktSizeCpy < 64) {
+		DBGPRINTF("SMB packet too small : %d\n", pktSizeCpy);
 		RETURN_DATA_AFTER(0)
 	}
 
@@ -110,7 +113,7 @@ data_ret_t *smb_parse(const uchar *packet, int pktSize, struct json_object *jpar
 		smb_header_t *hdr;
 	} smb_header_to_char;
 
-	smb_header_to_char.pck = packet;
+	smb_header_to_char.pck = packetCpy;
 	smb_header_t *smb_header = smb_header_to_char.hdr;
 	
 	char flags[5] = {0};

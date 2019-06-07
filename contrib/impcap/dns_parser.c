@@ -204,14 +204,13 @@ static const char *get_class(uint16_t x) {
 
 
 /*
- *  This function parses the bytes in the received packet to extract SMB2 metadata.
+ *  This function parses the bytes in the received packet to extract DNS metadata.
  *
  *  its parameters are:
  *    - a pointer on the list of bytes representing the packet
- *        the beginning of the header will be checked by the function
  *    - the size of the list passed as first parameter
  *    - a pointer on a json_object, containing all the metadata recovered so far
- *      this is also where SMB2 metadata will be added
+ *      this is also where DNS metadata will be added
  *
  *  This function returns a structure containing the data unprocessed by this parser
  *  or the ones after (as a list of bytes), and the length of this data.
