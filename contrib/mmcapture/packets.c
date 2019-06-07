@@ -124,6 +124,8 @@ void updatePacketFromHeaders(Packet *pkt) {
             if(inet_pton(AF_INET, pkt->ipv4h->dst, &(pkt->dst.address)) != 1) {
                 DBGPRINTF("copy of dst ipv4 address failed");
             }
+            pkt->src.family = AF_INET;
+            pkt->dst.family = AF_INET;
             pkt->proto = pkt->ipv4h->proto;
             pkt->flags |= PKT_ADDRS_KNOWN;
             pkt->flags |= PKT_PROTO_KNOWN;
@@ -136,6 +138,8 @@ void updatePacketFromHeaders(Packet *pkt) {
             if(inet_pton(AF_INET6, pkt->ipv6h->dst, &(pkt->dst.addr_in6addr)) != 1) {
                 DBGPRINTF("copy of dst ipv6 address failed");
             }
+            pkt->src.family = AF_INET6;
+            pkt->dst.family = AF_INET6;
             pkt->proto = pkt->ipv6h->proto;
             pkt->flags |= PKT_ADDRS_KNOWN;
             if(pkt->proto) {

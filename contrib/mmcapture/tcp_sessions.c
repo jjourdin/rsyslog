@@ -380,11 +380,31 @@ int handleTcpFromPacket(Packet *pkt) {
                 if(srcCon->state >= TCP_ESTABLISHED &&
                 dstCon->state >= TCP_ESTABLISHED &&
                 (!srcCon->streamBuffer->bufferDump || !dstCon->streamBuffer->bufferDump)) {
-                    char fileNameClient[20], fileNameServer[20];
+                    char fileNameClient[100], fileNameServer[100];
+                    char srcAddr[50];
+                    char dstAddr[50];
+
+                    if(session->flow->src.family == AF_INET) {
+                        if(!inet_ntop(AF_INET, (const void *)&(session->flow->src.address), srcAddr, 50)) {
+                            strncpy(srcAddr, "unknown", 50);
+                        }
+                        if(!inet_ntop(AF_INET, (const void *)&(session->flow->dst.address), dstAddr, 50)) {
+                            strncpy(dstAddr, "unknown", 50);
+                        }
+                    }
+                    else {
+                        if(!inet_ntop(AF_INET6, (const void *)&(session->flow->src.addr_in6addr), srcAddr, 50)) {
+                            strncpy(srcAddr, "unknown", 50);
+                        }
+                        if(!inet_ntop(AF_INET6, (const void *)&(session->flow->dst.addr_in6addr), dstAddr, 50)) {
+                            strncpy(dstAddr, "unknown", 50);
+                        }
+                    }
+
                     snprintf(fileNameClient,
-                             20, "tcp-%d-%d.dmp", session->flow->sp, session->flow->dp);
+                             100, "tcp[%s->%s](%d->%d).dmp", srcAddr, dstAddr, session->flow->sp, session->flow->dp);
                     snprintf(fileNameServer,
-                             20, "tcp-%d-%d.dmp", session->flow->dp, session->flow->sp);
+                             100, "tcp[%s->%s](%d->%d).dmp", srcAddr, dstAddr, session->flow->dp, session->flow->sp);
 
                     linkStreamBufferToDumpFile(session->cCon->streamBuffer, fileNameClient);
                     linkStreamBufferToDumpFile(session->sCon->streamBuffer, fileNameServer);
