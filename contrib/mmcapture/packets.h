@@ -34,6 +34,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <json.h>
+#include <time.h>
 
 #include "extract_impcap.h"
 #include "flow.h"
@@ -64,6 +65,8 @@ typedef struct Packet_ {
     uint16_t payloadLen;
 
     uint32_t pktNumber;
+
+    time_t enterTime;
 } Packet;
 
 void printPacketInfo(Packet *);

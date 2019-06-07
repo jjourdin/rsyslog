@@ -221,6 +221,7 @@ Flow *createNewFlowFromPacket(Packet *packet) {
             packet->hash = calculatePacketFlowHash(packet);
         }
         flow->flowHash = packet->hash;
+        flow->initPacketTime = packet->enterTime;
         flow->toDstPktCnt = 1;
         flow->toDstByteCnt = packet->payloadLen;
         flow->toSrcPktCnt = 0;
@@ -276,6 +277,7 @@ Flow *getOrCreateFlowFromHash(Packet *packet) {
             flow->toSrcPktCnt++;
             flow->toSrcByteCnt += packet->payloadLen;
         }
+        flow->lastPacketTime = packet->enterTime;
     }
 
     return flow;
@@ -283,9 +285,6 @@ Flow *getOrCreateFlowFromHash(Packet *packet) {
 
 void swapFlowDirection(Flow *flow) {
     DBGPRINTF("swapFlowDirection\n");
-
-    DBGPRINTF("flow before: \n");
-    printFlowInfo(flow);
 
     uint16_t portTemp = flow->sp;
     flow->sp = flow->dp;
@@ -296,8 +295,7 @@ void swapFlowDirection(Flow *flow) {
     COPY_ADDR(&flow->dst, &flow->src);
     COPY_ADDR(&addrTemp, &flow->dst);
 
-    DBGPRINTF("flow after: \n");
-    printFlowInfo(flow);
+    return;
 }
 
 int getFlowDirectionFromAddrs(Flow *flow, Address *src, Address *dst) {
@@ -367,6 +365,8 @@ void printFlowInfo(Flow *flow) {
     DBGPRINTF("flow->proto: %u\n", flow->proto);
     DBGPRINTF("flow->hash: %u\n", flow->flowHash);
     DBGPRINTF("flow->protoCtx: %p\n", flow->protoCtx);
+    DBGPRINTF("flow->initPacketTime: %u\n", flow->initPacketTime);
+    DBGPRINTF("flow->lastPacketTime: %u\n", flow->lastPacketTime);
     DBGPRINTF("flow->toDstPktCnt: %u\n", flow->toDstPktCnt);
     DBGPRINTF("flow->toSrcPktCnt: %u\n", flow->toSrcPktCnt);
     DBGPRINTF("flow->toDstByteCnt: %lu\n", flow->toDstByteCnt);

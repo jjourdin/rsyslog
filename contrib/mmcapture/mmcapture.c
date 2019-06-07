@@ -45,6 +45,7 @@
 #include "module-template.h"
 #include "rainerscript.h"
 #include "rsconf.h"
+#include "datetime.h"
 
 #include "packets.h"
 #include "file_utils.h"
@@ -59,6 +60,7 @@ MODULE_CNFNAME("mmcapture")
 
 /* static data */
 DEF_OMOD_STATIC_DATA
+DEFobjCurrIf(datetime)
 
 #define IMPCAP_METADATA "!impcap"
 #define IMPCAP_DATA     "!data"
@@ -274,6 +276,8 @@ CODESTARTdoAction
 
     Packet *pkt = getImpcapData(pMsg);
 
+    pkt->enterTime = datetime.GetTime(NULL);
+
     pkt->hash = calculatePacketFlowHash(pkt);
 
 //    printPacketInfo(pkt);
@@ -351,6 +355,7 @@ ENDdbgPrintInstInfo
 BEGINmodExit
 CODESTARTmodExit
     DBGPRINTF("mmcapture: exit\n");
+    objRelease(datetime, CORE_COMPONENT);
 ENDmodExit
 
 /* declaration of functions */
@@ -367,4 +372,5 @@ BEGINmodInit()
 CODESTARTmodInit
     DBGPRINTF("mmcapture: init\n");
     *ipIFVersProvided = CURR_MOD_IF_VERSION;
+    CHKiRet(objUse(datetime, CORE_COMPONENT));
 ENDmodInit

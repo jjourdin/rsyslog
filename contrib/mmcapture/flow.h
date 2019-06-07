@@ -25,6 +25,7 @@
  * limitations under the License.
  */
 #include <pthread.h>
+#include <time.h>
 
 #include "packet-utils.h"
 #include "rand_utils.h"
@@ -50,7 +51,7 @@ typedef struct FlowCnf_ {
 #define FLOW_DEFAULT_HASHSIZE   65536
 
     uint32_t maxFlow;
-#define FLOW_DEFAULT_MAXCONN    512
+#define FLOW_DEFAULT_MAXCONN    8192
 
     FlowList **flowHashLists;
     FlowList *flowList;
@@ -103,6 +104,9 @@ typedef struct Flow_ {
 
     struct Flow_ *prevFlow;
     struct Flow_ *nextFlow;
+
+    time_t initPacketTime;
+    time_t lastPacketTime;
 
     pthread_mutex_t mLock;
 } Flow;
