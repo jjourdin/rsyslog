@@ -179,7 +179,6 @@ CODE_STD_STRING_REQUESTnewActInst(1)
     flowInitConfig(pData->globalFlowCnf);
     yaraInitConfig(pData->globalYaraCnf);
     streamInitConfig(pData->globalStreamsCnf);
-    strncpy(pData->logFile->fileFullPath, "/var/log/rsyslog/mmcapture.log", 256);
 
     for(i = 0; i < actpblk.nParams; ++i) {
         if(!pvals[i].bUsed)
@@ -238,8 +237,12 @@ CODE_STD_STRING_REQUESTnewActInst(1)
             DBGPRINTF("streamStoreFolder set to '%s'\n", pData->globalStreamsCnf->streamStoreFolder);
         }
         else if(!strcmp(actpblk.descr[i].name, "logFile")) {
-            free(pData->logFile->fileFullPath); /* freeing old allocated memory */
-            pData->logFile->fileFullPath = es_str2cstr(pvals[i].val.d.estr, NULL);
+            strncpy(pData->logFile->fileFullPath, es_str2cstr(pvals[i].val.d.estr, NULL), 256);
+            FILE *logFile = openFile(dirname(pData->logFile->fileFullPath), basename(pData->logFile->fileFullPath));
+            if(logFile) {
+                pData->logFile->pFile = logFile;
+                DBGPRINTF("logFile '%s' opened\n", pData->logFile->fileFullPath);
+            }
         }
         else {
             LogError(0, RS_RET_PARAM_ERROR, "mmcapture: unhandled parameter '%s'\n", actpblk.descr[i].name);
@@ -252,12 +255,6 @@ CODE_STD_STRING_REQUESTnewActInst(1)
         free(pData->globalStreamsCnf->streamStoreFolder);
     }
 
-    char *logFilePath = pData->logFile->fileFullPath;
-    FILE *logFile = openFile(dirname(logFilePath), basename(logFilePath));
-    if(logFile) {
-        pData->logFile->pFile = logFile;
-        DBGPRINTF("logFile '%s' opened\n", logFilePath);
-    }
 
 CODE_STD_FINALIZERnewActInst
 ENDnewActInst
@@ -321,7 +318,8 @@ CODESTARTdoAction
 
         if(yaraMeta) {
             if(pData->logFile->pFile) {
-                appendLineToFile(fjson_object_to_json_string(yaraMeta), pData->logFile->pFile);
+                DBGPRINTF("appening line to file\n");
+                appendLineToFile(fjson_object_to_json_string(yaraMeta), pData->logFile);
             }
             else {
                 msgAddJSON(pMsg, (unsigned char *)YARA_METADATA, yaraMeta, 0, 0);

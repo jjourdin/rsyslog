@@ -99,7 +99,8 @@ int linkStreamBufferToDumpFile(StreamBuffer *sb, char *filename) {
         FILE *opened = openFile(streamsCnf->streamStoreFolder, filename);
         if(!opened) return -1;
 
-        sb->bufferDump = opened;
+        strncpy(sb->bufferDump->fileFullPath, filename, 256);
+        sb->bufferDump->pFile = opened;
     }
     return 0;
 }
@@ -125,7 +126,8 @@ StreamBuffer *streamBufferCreate() {
 
     StreamBuffer *sb = calloc(1, sizeof(StreamBuffer));
     if(sb) {
-        if(initBuffer(sb) == 0) {
+        sb->bufferDump = createFileStruct();
+        if(initBuffer(sb) == 0 && sb->bufferDump) {
             addBufferToConfList(sb);
             return sb;
         }
@@ -142,10 +144,7 @@ void streamBufferDelete(StreamBuffer *sb) {
     if(sb) {
         removeBufferFromConfList(sb);
 
-        if(sb->bufferDump) {
-            streamBufferDumpToFile(sb);
-            fclose(sb->bufferDump);
-        }
+        deleteFileStruct(sb->bufferDump);
 
         if(sb->buffer) free(sb->buffer);
         if(sb->ruleList) yaraDeleteRuleList(sb->ruleList);

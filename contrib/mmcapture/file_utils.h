@@ -51,8 +51,8 @@ typedef struct FileStruct_ {
     uint32_t size;
 } FileStruct;
 
-void addDataToFile(char* pData, uint32_t sizeData, uint32_t offSet, FILE* file);
-void appendLineToFile(char *, FILE *);
+void addDataToFile(char* pData, uint32_t sizeData, uint32_t offSet, FileStruct* file);
+void appendLineToFile(char *, FileStruct *);
 FILE* openFile(const char* path, const char* file_name);
 int createFolder(char* folder);
 FileStruct *createFileStruct();

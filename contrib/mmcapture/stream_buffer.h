@@ -61,7 +61,7 @@ typedef struct StreamBuffer_ {
     uint32_t sbsNumber;
     StreamBufferSegment *sbsList;
 
-    FILE *bufferDump;
+    FileStruct *bufferDump;
 
     struct StreamBuffer_ *next;
     struct StreamBuffer_ *prev;

@@ -35,34 +35,50 @@
  *  - a pointer on the data
  *  - the number of bytes to write
  *  - the offset where to begin writing (beginning at zero)
- *  - the file where to write the data
+ *  - the file structure where the data will be written
  *
- *  The file must not be NULL and must already be opened
+ *  The file structure must not be NULL and must already be created
  *
  *  If the offset provided is past the end of the file, zeros will be written
  *  to fill the missing space
 */
-void addDataToFile(char* pData, uint32_t sizeData, uint32_t offSet, FILE* file){
+void addDataToFile(char* pData, uint32_t sizeData, uint32_t offSet, FileStruct* file){
     char zero = 0x00;
     uint32_t i;
 
-    fseek(file, 0, SEEK_END);
-    int diff = offSet - ftell(file);
+    pthread_mutex_lock(&(file->mFile));
+
+    fseek(file->pFile, 0, SEEK_END);
+    int diff = offSet - ftell(file->pFile);
     if (diff > 0){
         for(i = 0; i < (uint32_t)diff; i++){
-            fwrite(&zero, sizeof(char), 1, file);
+            fwrite(&zero, sizeof(char), 1, file->pFile);
         }
     }
 
-    fseek(file, offSet, SEEK_SET);
-    fwrite(pData, sizeof(char), sizeData, file);
+    fseek(file->pFile, offSet, SEEK_SET);
+    fwrite(pData, sizeof(char), sizeData, file->pFile);
+    fflush(file->pFile);
+
+    file->size += sizeData;
+
+    pthread_mutex_unlock(&(file->mFile));
+    return;
 }
 
-void appendLineToFile(char *pLine, FILE *file) {
+void appendLineToFile(char *pLine, FileStruct *file) {
     int lineLength = strlen(pLine);
-    fseek(file, 0, SEEK_END);
-    fwrite(strcat(pLine, "\r\n"), sizeof(char), lineLength + 2, file);
-    fflush(file);
+
+    pthread_mutex_lock(&(file->mFile));
+
+    fseek(file->pFile, 0, SEEK_END);
+    fwrite(strcat(pLine, "\r\n"), sizeof(char), lineLength + 2, file->pFile);
+    fflush(file->pFile);
+
+    file->size += lineLength + 2;
+
+    pthread_mutex_unlock(&(file->mFile));
+    return;
 }
 
 /*
@@ -201,7 +217,8 @@ void deleteFileStruct(FileStruct *file) {
     if(file) {
         pthread_mutex_destroy(&(file->mFile));
         free(file->fileFullPath);
-        fclose(file->pFile);
+        if(file->pFile) fclose(file->pFile);
         free(file);
     }
+    return;
 }
