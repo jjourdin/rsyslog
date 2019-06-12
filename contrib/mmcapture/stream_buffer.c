@@ -109,7 +109,7 @@ uint32_t streamBufferDumpToFile(StreamBuffer *sb) {
     DBGPRINTF("streamBufferDumpToFile\n");
     uint32_t writeAmount = 0;
 
-    if(sb->bufferDump) {
+    if(sb->bufferDump->pFile) {
         StreamBufferSegment *sbs = sb->sbsList;
         while(sbs) {
             addDataToFile((char *)(sb->buffer + sbs->streamOffset), sbs->length, sbs->streamOffset, sb->bufferDump);
@@ -144,6 +144,7 @@ void streamBufferDelete(StreamBuffer *sb) {
     if(sb) {
         removeBufferFromConfList(sb);
 
+        streamBufferDumpToFile(sb);
         deleteFileStruct(sb->bufferDump);
 
         if(sb->buffer) free(sb->buffer);
