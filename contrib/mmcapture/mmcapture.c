@@ -291,8 +291,6 @@ CODESTARTdoAction
                 tcpSessionDelete(session);
                 pkt->flow->protoCtx = NULL;
             }
-
-
         }
     }
 
@@ -318,8 +316,19 @@ CODESTARTdoAction
 
         if(yaraMeta) {
             if(pData->logFile->pFile) {
-                DBGPRINTF("appening line to file\n");
-                appendLineToFile(fjson_object_to_json_string(yaraMeta), pData->logFile);
+                struct fjson_object *jsonLine = fjson_object_new_object();
+                struct syslogTime detectionTime;
+                char detectionTimeStr[64];
+                datetime.getCurrTime(&detectionTime, NULL, 1);
+                datetime.formatTimestamp3339(&detectionTime, detectionTimeStr);
+                fjson_object_object_add(jsonLine, "ID", fjson_object_new_int(pkt->pktNumber));
+                fjson_object_object_add(jsonLine, "time_detected", fjson_object_new_string(detectionTimeStr));
+                fjson_object_object_add(jsonLine, "net_src_ip", fjson_object_new_string(getAddrString(pkt->src)));
+                fjson_object_object_add(jsonLine, "net_dst_ip", fjson_object_new_string(getAddrString(pkt->dst)));
+
+                fjson_object_object_add(jsonLine, "", yaraMeta);
+
+                appendLineToFile(fjson_object_to_json_string(jsonLine), pData->logFile);
             }
             else {
                 msgAddJSON(pMsg, (unsigned char *)YARA_METADATA, yaraMeta, 0, 0);

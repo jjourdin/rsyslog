@@ -29,6 +29,7 @@
 
 #include <stdlib.h>
 #include <stdint.h>
+#include <string.h>
 #include <sys/param.h>
 
 #ifdef __FreeBSD__
@@ -82,5 +83,20 @@ typedef struct Address_ {
       (a1)->addr_data32[1] == (a2)->addr_data32[1] && \
       (a1)->addr_data32[0] == (a2)->addr_data32[0]))
 
+static inline char *getAddrString(Address addr) {
+    char *ret = malloc(50);
+    if(addr.family == AF_INET) {
+        if(!inet_ntop(AF_INET, (const void *)&(addr.address), ret, 50)) {
+            strncpy(ret, "unknown", 50);
+        }
+    }
+    else {
+        if(!inet_ntop(AF_INET6, (const void*)&(addr.addr_in6addr), ret, 50)) {
+            strncpy(ret, "unknown", 50);
+        }
+    }
+
+    return ret;
+}
 
 #endif /* PACKET_UTILS_H */
