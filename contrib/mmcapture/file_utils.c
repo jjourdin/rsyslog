@@ -58,6 +58,13 @@ void addDataToFile(char* pData, uint32_t sizeData, uint32_t offSet, FILE* file){
     fwrite(pData, sizeof(char), sizeData, file);
 }
 
+void appendLineToFile(char *pLine, FILE *file) {
+    int lineLength = strlen(pLine);
+    fseek(file, 0, SEEK_END);
+    fwrite(strcat(pLine, "\r\n"), sizeof(char), lineLength + 2, file);
+    fflush(file);
+}
+
 /*
  *  This function opens a file given a name and a path:
  *  - if the file exists it is simply opened
@@ -76,16 +83,28 @@ FILE* openFile(const char* path, const char* file_name){
     DIR *dir;
     FILE *file = NULL;
     char *new_file_comp_path = NULL;
+    char *pChar;
 
     assert(file_name != NULL);
     assert(path != NULL);
 
+    pChar = path;
+    while(*pChar++ != '\0') { }
+    if(*--pChar == '/') *pChar = '\0';
+
     DBGPRINTF("opening file %s in folder %s\n", file_name, path);
 
     dir = opendir(path);
+    if(!dir) {
+        DBGPRINTF("folder doesn't exist, creating\n");
+        createFolder(path);
+    }
+    dir = opendir(path);
+
     if(dir != NULL){
         new_file_comp_path = malloc(strlen(path)+1+strlen(file_name)+1);
         strcpy(new_file_comp_path,path);
+        strcat(new_file_comp_path,"/");
         strcat(new_file_comp_path,file_name);
 
         /* assuming file is created, opening */
@@ -126,6 +145,7 @@ FILE* openFile(const char* path, const char* file_name){
  *  separate calls are necessary to create them
 */
 int createFolder(char* folder){
+    DBGPRINTF("creating folder '%s'\n", folder);
     struct stat file_stat;
     int ret;
 
@@ -152,8 +172,7 @@ int createFolder(char* folder){
                             "cannot create folder %s: name is too long\n", folder);
                             break;
                     case ENOENT:
-                            LogError(0, RS_RET_ERR,
-                            "cannot create folder %s: path doesn't exist\n", folder);
+                            createFolder(dirname(folder));
                             break;
                     case ENOSPC:
                             LogError(0, RS_RET_ERR,
@@ -169,4 +188,20 @@ int createFolder(char* folder){
         }
     }
     return 0;
+}
+
+FileStruct *createFileStruct() {
+    FileStruct *newFile = calloc(1, sizeof(FileStruct));
+    pthread_mutex_init(&(newFile->mFile), NULL);
+    newFile->fileFullPath = malloc(256);
+    return newFile;
+}
+
+void deleteFileStruct(FileStruct *file) {
+    if(file) {
+        pthread_mutex_destroy(&(file->mFile));
+        free(file->fileFullPath);
+        fclose(file->pFile);
+        free(file);
+    }
 }

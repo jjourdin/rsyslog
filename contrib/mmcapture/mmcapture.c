@@ -73,6 +73,7 @@ typedef struct instanceData_s {
     StreamsCnf *globalStreamsCnf;
     FlowCnf *globalFlowCnf;
     YaraCnf *globalYaraCnf;
+    FileStruct *logFile;
 } instanceData;
 
 typedef struct wrkrInstanceData {
@@ -92,7 +93,8 @@ static struct cnfparamdescr actpdescr[] = {
     { "maxConnections", eCmdHdlrPositiveInt, 0 },
     { "yaraRuleFile", eCmdHdlrString, 0 },
     { "yaraScanType", eCmdHdlrGetWord, 0 },
-    { "yaraScanMaxSize", eCmdHdlrPositiveInt, 0 }
+    { "yaraScanMaxSize", eCmdHdlrPositiveInt, 0 },
+    { "logFile", eCmdHdlrString, 0 }
 };
 
 static struct cnfparamblk actpblk = {
@@ -139,6 +141,7 @@ CODESTARTcreateInstance
     pData->globalStreamsCnf = calloc(1, sizeof(StreamsCnf));
     pData->globalFlowCnf = calloc(1, sizeof(FlowCnf));
     pData->globalYaraCnf = calloc(1, sizeof(YaraCnf));
+    pData->logFile = createFileStruct();
 ENDcreateInstance
 
 BEGINcreateWrkrInstance
@@ -152,6 +155,7 @@ CODESTARTfreeInstance
     streamDeleteConfig(pData->globalStreamsCnf);
     flowDeleteConfig(pData->globalFlowCnf);
     yaraDeleteConfig(pData->globalYaraCnf);
+    deleteFileStruct(pData->logFile);
 ENDfreeInstance
 
 BEGINfreeWrkrInstance
@@ -175,6 +179,7 @@ CODE_STD_STRING_REQUESTnewActInst(1)
     flowInitConfig(pData->globalFlowCnf);
     yaraInitConfig(pData->globalYaraCnf);
     streamInitConfig(pData->globalStreamsCnf);
+    strncpy(pData->logFile->fileFullPath, "/var/log/rsyslog/mmcapture.log", 256);
 
     for(i = 0; i < actpblk.nParams; ++i) {
         if(!pvals[i].bUsed)
@@ -227,27 +232,14 @@ CODE_STD_STRING_REQUESTnewActInst(1)
             DBGPRINTF("yaraScanMaxSize set to %u\n", pData->globalYaraCnf->scanMaxSize);
         }
         else if(!strcmp(actpblk.descr[i].name, "streamStoreFolder")) {
-            char *tempFolder = es_str2cstr(pvals[i].val.d.estr, NULL);
-            char *finalFolder;
-            char *pChar = tempFolder;
-            uint32_t size = 1;
-            while(*pChar != '\0') { pChar++; size++; }
-            if(*--pChar != '/') {
-                finalFolder = malloc(size + 1);
-                memcpy(finalFolder, tempFolder, size);
-                finalFolder[size - 1] = '/';
-                finalFolder[size] = '\0';
-                free(tempFolder);
-            }
-            else {
-                finalFolder = tempFolder;
-            }
-
             free(pData->globalStreamsCnf->streamStoreFolder); /* freeing old allocated memory */
-            pData->globalStreamsCnf->streamStoreFolder = finalFolder;
+            pData->globalStreamsCnf->streamStoreFolder = es_str2cstr(pvals[i].val.d.estr, NULL);
 
             DBGPRINTF("streamStoreFolder set to '%s'\n", pData->globalStreamsCnf->streamStoreFolder);
-
+        }
+        else if(!strcmp(actpblk.descr[i].name, "logFile")) {
+            free(pData->logFile->fileFullPath); /* freeing old allocated memory */
+            pData->logFile->fileFullPath = es_str2cstr(pvals[i].val.d.estr, NULL);
         }
         else {
             LogError(0, RS_RET_PARAM_ERROR, "mmcapture: unhandled parameter '%s'\n", actpblk.descr[i].name);
@@ -258,6 +250,13 @@ CODE_STD_STRING_REQUESTnewActInst(1)
         LogError(0, RS_RET_CONFIG_ERROR, "error while creating folder '%s' for stream dumps,"
                                          " streams won't be dumped", pData->globalStreamsCnf->streamStoreFolder);
         free(pData->globalStreamsCnf->streamStoreFolder);
+    }
+
+    char *logFilePath = pData->logFile->fileFullPath;
+    FILE *logFile = openFile(dirname(logFilePath), basename(logFilePath));
+    if(logFile) {
+        pData->logFile->pFile = logFile;
+        DBGPRINTF("logFile '%s' opened\n", logFilePath);
     }
 
 CODE_STD_FINALIZERnewActInst
@@ -321,7 +320,12 @@ CODESTARTdoAction
         }
 
         if(yaraMeta) {
-            msgAddJSON(pMsg, (unsigned char *)YARA_METADATA, yaraMeta, 0, 0);
+            if(pData->logFile->pFile) {
+                appendLineToFile(fjson_object_to_json_string(yaraMeta), pData->logFile->pFile);
+            }
+            else {
+                msgAddJSON(pMsg, (unsigned char *)YARA_METADATA, yaraMeta, 0, 0);
+            }
         }
     }
 

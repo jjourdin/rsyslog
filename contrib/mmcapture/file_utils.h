@@ -34,6 +34,8 @@
 #include <sys/stat.h>
 #include <errno.h>
 #include <sys/types.h>
+#include <pthread.h>
+#include <libgen.h>
 
 #include "rsyslog.h"
 #include "errmsg.h"
@@ -42,8 +44,18 @@
 #ifndef FILE_UTILS_H
 #define FILE_UTILS_H
 
+typedef struct FileStruct_ {
+    char *fileFullPath;
+    FILE *pFile;
+    pthread_mutex_t mFile;
+    uint32_t size;
+} FileStruct;
+
 void addDataToFile(char* pData, uint32_t sizeData, uint32_t offSet, FILE* file);
+void appendLineToFile(char *, FILE *);
 FILE* openFile(const char* path, const char* file_name);
 int createFolder(char* folder);
+FileStruct *createFileStruct();
+void deleteFileStruct(FileStruct *);
 
 #endif /* FILE_UTILS_H */
