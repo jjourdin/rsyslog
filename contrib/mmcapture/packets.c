@@ -197,6 +197,10 @@ FlowHash calculatePacketFlowHash(Packet *pkt) {
 
     if(pkt) {
         if(pkt->flags & PKT_HASH_READY) {
+            pthread_mutex_lock(&(globalFlowCnf->mConf));
+            uint32_t hash_rand = (uint32_t)globalFlowCnf->hash_rand;
+            pthread_mutex_unlock(&(globalFlowCnf->mConf));
+
             if(pkt->flags & PKT_IPV4_ADDR) {
                 FlowHashKey4 *fk = malloc(sizeof(FlowHashKey4));
 
@@ -210,7 +214,7 @@ FlowHash calculatePacketFlowHash(Packet *pkt) {
 
                 fk->proto = (uint32_t) pkt->proto;
 
-                hash = hashword(fk->u32, 4, (uint32_t) globalFlowCnf->hash_rand);
+                hash = hashword(fk->u32, 4, hash_rand);
                 DBGPRINTF("computed packet hash value: %X\n", hash);
 
                 free(fk);
@@ -246,7 +250,7 @@ FlowHash calculatePacketFlowHash(Packet *pkt) {
 
                 fk->proto = (uint32_t) pkt->proto;
 
-                hash = hashword(fk->u32, 10, (uint32_t) globalFlowCnf->hash_rand);
+                hash = hashword(fk->u32, 10, hash_rand);
                 DBGPRINTF("computed packet hash value: %X\n", hash);
 
                 free(fk);

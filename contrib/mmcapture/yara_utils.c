@@ -209,6 +209,8 @@ static inline int yaraScanStreamElem(YaraStreamElem *elem, int fastMode, int tim
 struct json_object *yaraScan(uint8_t *buffer, uint32_t buffLen, StreamBuffer *sb) {
     YaraStreamElem *elem = calloc(1, sizeof(YaraStreamElem));
     elem->ruleList = yaraCreateRuleList();
+    struct json_object *rules = json_object_new_array();
+    uint8_t newRules = 0;
 
     if(globalYaraCnf->scanType == SCAN_PACKET_ONLY) {
         DBGPRINTF("YARA: initializing packet scan\n");
@@ -219,7 +221,6 @@ struct json_object *yaraScan(uint8_t *buffer, uint32_t buffLen, StreamBuffer *sb
         }
         else {
             DBGPRINTF("YARA: trying to launch packet scan without providing buffer and length\n");
-            return NULL;
         }
     }
     else {
@@ -239,7 +240,6 @@ struct json_object *yaraScan(uint8_t *buffer, uint32_t buffLen, StreamBuffer *sb
         }
         else {
             DBGPRINTF("YARA: trying to launch stream scan without providing StreamBuffer\n");
-            return NULL;
         }
     }
 
@@ -247,13 +247,10 @@ struct json_object *yaraScan(uint8_t *buffer, uint32_t buffLen, StreamBuffer *sb
         DBGPRINTF("YARA: scanning %u bytes at %p\n", elem->length, elem->buffer);
         if(yaraScanStreamElem(elem, 0, 1)) {
             DBGPRINTF("YARA: error while trying to launch scan\n");
-            return NULL;
         }
-
-        if(elem->ruleList->fill) {
+        else if(elem->ruleList->fill) {
             const char *yaraRuleTag;
-            struct json_object *rules = json_object_new_array();
-            uint32_t i, newRules = 0;
+            uint32_t i;
 
             DBGPRINTF("YARA: %u element(s) found in scan\n", elem->ruleList->fill);
 
@@ -280,15 +277,13 @@ struct json_object *yaraScan(uint8_t *buffer, uint32_t buffLen, StreamBuffer *sb
                     json_object_array_add(rules, ruleJson);
                 }
             }
-
-            if(newRules)    return rules;
-            else            return NULL;
         }
     }
 
     yaraDeleteRuleList(elem->ruleList);
     free(elem);
-    return NULL;
+    if(newRules)    return rules;
+    else            return NULL;
 }
 
 void yaraErrorCallback(int errorLevel, const char *fileName, int lineNumber, const char *message, void *userData) {

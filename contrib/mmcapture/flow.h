@@ -42,7 +42,7 @@ typedef struct FlowList_ {
     uint32_t listSize;
     struct Flow_ *head;
     struct Flow_ *tail;
-    pthread_mutex_t mLock;
+    pthread_mutex_t mFlowList;
 } FlowList;
 
 typedef struct FlowCnf_ {
@@ -55,6 +55,8 @@ typedef struct FlowCnf_ {
 
     FlowList **flowHashLists;
     FlowList *flowList;
+
+    pthread_mutex_t mConf;
 } FlowCnf;
 
 extern FlowCnf *globalFlowCnf;
@@ -108,7 +110,7 @@ typedef struct Flow_ {
     time_t initPacketTime;
     time_t lastPacketTime;
 
-    pthread_mutex_t mLock;
+    pthread_mutex_t mFlow;
 } Flow;
 
 #define CMP_FLOW(f1,f2) \

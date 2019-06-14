@@ -37,9 +37,13 @@ static inline Flow *createNewFlow() {
         CLEAR_ADDR(&flow->src);
         CLEAR_ADDR(&flow->dst);
 
-        if(pthread_mutex_init(&flow->mLock, NULL) != 0) {
+        pthread_mutexattr_t attr;
+        pthread_mutexattr_init(&attr);
+        pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+        if(pthread_mutex_init(&flow->mFlow, &attr) != 0) {
             DBGPRINTF("could not init flow mutex\n");
         }
+        pthread_mutexattr_destroy(&attr);
     }
     else {
         DBGPRINTF("error: could not claim memory for new Flow object\n")
@@ -50,7 +54,7 @@ static inline Flow *createNewFlow() {
 
 void deleteFlow(Flow *flow) {
     if(flow) {
-        pthread_mutex_destroy(&(flow->mLock));
+        pthread_mutex_destroy(&(flow->mFlow));
         if(flow->protoCtx) free(flow->protoCtx);
         free(flow);
     }
@@ -65,9 +69,14 @@ static inline FlowList *initNewFlowList() {
 
     flowList = calloc(1, sizeof(FlowList));
     if(flowList) {
-        if(pthread_mutex_init(&(flowList->mLock), NULL) == 0) {
+        pthread_mutexattr_t attr;
+        pthread_mutexattr_init(&attr);
+        pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+        if(pthread_mutex_init(&(flowList->mFlowList), &attr) == 0) {
+            pthread_mutexattr_destroy(&attr);
             return flowList;
         }
+        pthread_mutexattr_destroy(&attr);
     }
 
     return NULL;
@@ -75,6 +84,7 @@ static inline FlowList *initNewFlowList() {
 
 static inline void deleteFlowListElems(FlowList *flowList) {
     if(flowList) {
+        pthread_mutex_lock(&(flowList->mFlowList));
         Flow *delete, *flow = flowList->head;
         while(flow) {
             delete = flow;
@@ -83,6 +93,7 @@ static inline void deleteFlowListElems(FlowList *flowList) {
         }
 
         flowList->listSize = 0;
+        pthread_mutex_unlock(&(flowList->mFlowList));
     }
 
     return;
@@ -90,7 +101,7 @@ static inline void deleteFlowListElems(FlowList *flowList) {
 
 static inline void deleteFlowList(FlowList *flowList) {
     if(flowList) {
-        pthread_mutex_destroy(&(flowList->mLock));
+        pthread_mutex_destroy(&(flowList->mFlowList));
         free(flowList);
     }
     return ;
@@ -100,22 +111,20 @@ static inline int addFlowToList(Flow *flow, FlowList *flowList) {
     DBGPRINTF("addFlowToList\n")
 
     if(flow && flowList) {
-        pthread_mutex_lock(&flowList->mLock);
+        pthread_mutex_lock(&flowList->mFlowList);
         if(flowList->tail) {
             flowList->tail->nextFlow = flow;
             flowList->tail = flow;
 
-            pthread_mutex_lock(&flow->mLock);
             flow->prevFlow = flowList->tail;
             flow->nextFlow = NULL;
-            pthread_mutex_unlock(&flow->mLock);
         }
         else {
             flowList->tail = flow;
             flowList->head = flow;
         }
         flowList->listSize++;
-        pthread_mutex_unlock(&flowList->mLock);
+        pthread_mutex_unlock(&flowList->mFlowList);
         return 1;
     }
     else {
@@ -127,6 +136,8 @@ static inline int removeFlowFromList(Flow *flow, FlowList *flowList) {
     DBGPRINTF("removeFlowFromList\n")
 
     if(flow && flowList) {
+        pthread_mutex_lock(&flowList->mFlowList);
+
         if(flowList->head) {
             Flow *flowSearch = flowList->head;
             uint8_t found = 0;
@@ -136,13 +147,6 @@ static inline int removeFlowFromList(Flow *flow, FlowList *flowList) {
             }while(flowSearch->nextFlow && !found);
 
             if(found) {
-                pthread_mutex_lock(&flowList->mLock);
-                if (flowSearch->nextFlow) {
-                    flowSearch->nextFlow = flowSearch->prevFlow;
-                }
-                if (flowSearch->prevFlow) {
-                    flowSearch->prevFlow = flowSearch->nextFlow;
-                }
                 if (flowSearch == flowList->head) {
                     flowList->head = flowList->head->nextFlow;
                 }
@@ -150,16 +154,23 @@ static inline int removeFlowFromList(Flow *flow, FlowList *flowList) {
                     flowList->tail = flowList->tail->prevFlow;
                 }
                 flowList->listSize--;
-                pthread_mutex_unlock(&flowList->mLock);
 
-                pthread_mutex_lock(&flow->mLock);
-                flow->nextFlow = NULL;
-                flow->prevFlow = NULL;
-                pthread_mutex_unlock(&flow->mLock);
+                if (flowSearch->nextFlow) {
+                    flowSearch->nextFlow = flowSearch->prevFlow;
+                }
 
+                if (flowSearch->prevFlow) {
+                    flowSearch->prevFlow = flowSearch->nextFlow;
+                }
+
+                flowSearch->nextFlow = NULL;
+                flowSearch->prevFlow = NULL;
+
+                pthread_mutex_unlock(&flowList->mFlowList);
                 return 1;
             }
         }
+        pthread_mutex_unlock(&flowList->mFlowList);
     }
 
     return 0;
@@ -167,11 +178,12 @@ static inline int removeFlowFromList(Flow *flow, FlowList *flowList) {
 
 void flowInitConfig(FlowCnf *conf) {
     DBGPRINTF("init flow config, conf addr: %p\n", conf);
-    memset(conf, 0, sizeof(FlowCnf));
 
     conf->hash_rand = (uint32_t) getRandom();
     conf->hash_size = FLOW_DEFAULT_HASHSIZE;
     conf->maxFlow = FLOW_DEFAULT_MAXCONN;
+
+    pthread_mutex_init(&(conf->mConf), NULL);
 
     DBGPRINTF("global flow conf hash_rand: %u\n", conf->hash_rand);
     DBGPRINTF("global flow conf hash_size: %u\n", conf->hash_size);
@@ -199,6 +211,8 @@ void flowDeleteConfig(FlowCnf *conf) {
             deleteFlowList(conf->flowHashLists[i]);
         }
         free(conf->flowHashLists);
+
+        pthread_mutex_destroy(&(conf->mConf));
 
         free(conf);
     }
@@ -239,13 +253,16 @@ Flow *getOrCreateFlowFromHash(Packet *packet) {
     FlowHash hash = packet->hash;
     Flow *flow;
 
+    pthread_mutex_lock(&(globalFlowCnf->mConf));
     flowList = globalFlowCnf->flowHashLists[hash % globalFlowCnf->hash_size];
 
     if(flowList == NULL) {
         flowList = initNewFlowList();
         globalFlowCnf->flowHashLists[hash % globalFlowCnf->hash_size] = flowList;
     }
+    pthread_mutex_unlock(&(globalFlowCnf->mConf));
 
+    pthread_mutex_lock(&(flowList->mFlowList));
     flow = flowList->head;
     uint8_t found = 0;
     while(flow && !found) {
@@ -255,20 +272,22 @@ Flow *getOrCreateFlowFromHash(Packet *packet) {
 
 
     if(!flow) {
+        pthread_mutex_lock(&(globalFlowCnf->flowList->mFlowList));
         if(globalFlowCnf->flowList->listSize < globalFlowCnf->maxFlow) {
             DBGPRINTF("creating new flow and adding it to lists\n");
             flow = createNewFlowFromPacket(packet);
             addFlowToList(flow, flowList);
             addFlowToList(flow, globalFlowCnf->flowList);
-            DBGPRINTF("new number of followed flows: %u\n", globalFlowCnf->flowList->listSize);
         }
         else {
             DBGPRINTF("max number of flows reached, cannot open new Flow\n");
         }
+        pthread_mutex_unlock(&(globalFlowCnf->flowList->mFlowList));
+        pthread_mutex_unlock(&(flowList->mFlowList));
     }
     else {
+        pthread_mutex_unlock(&(flowList->mFlowList));
         DBGPRINTF("found existing flow\n");
-        DBGPRINTF("number of followed flows: %u\n", globalFlowCnf->flowList->listSize);
         if(getPacketFlowDirection(flow, packet) == TO_SERVER) {
             flow->toDstByteCnt++;
             flow->toDstByteCnt += packet->payloadLen;
@@ -286,6 +305,7 @@ Flow *getOrCreateFlowFromHash(Packet *packet) {
 void swapFlowDirection(Flow *flow) {
     DBGPRINTF("swapFlowDirection\n");
 
+    pthread_mutex_lock(&(flow->mFlow));
     uint16_t portTemp = flow->sp;
     flow->sp = flow->dp;
     flow->dp = portTemp;
@@ -294,6 +314,7 @@ void swapFlowDirection(Flow *flow) {
     COPY_ADDR(&flow->src, &addrTemp);
     COPY_ADDR(&flow->dst, &flow->src);
     COPY_ADDR(&addrTemp, &flow->dst);
+    pthread_mutex_unlock(&(flow->mFlow));
 
     return;
 }
@@ -326,27 +347,34 @@ int getFlowDirectionFromPorts(Flow *flow, const Port sp, const Port dp) {
     }
 }
 
+/**
+ * WARNING: will return default TO_SERVER when protocol is not handled
+ * @param flow
+ * @param pkt
+ * @return
+ */
 int getPacketFlowDirection(Flow *flow, Packet *pkt) {
     DBGPRINTF("getPacketFlowDirection\n");
-    int ret;
+    int ret = 0;
 
+    pthread_mutex_lock(&(flow->mFlow));
     if(pkt->proto == IPPROTO_TCP || pkt->proto == IPPROTO_UDP) {
         ret = getFlowDirectionFromPorts(flow, pkt->sp, pkt->dp);
-        if(ret != -1) {
-            return ret;
-        }
-        else {
-            return getFlowDirectionFromAddrs(flow, &pkt->src, &pkt->dst);
+        if(ret == -1) {
+            ret = getFlowDirectionFromAddrs(flow, &pkt->src, &pkt->dst);
         }
     }
     else if(pkt->proto == IPPROTO_ICMP || pkt->proto == IPPROTO_ICMPV6) {
-        return getFlowDirectionFromAddrs(flow, &pkt->src, &pkt->dst);
+        ret = getFlowDirectionFromAddrs(flow, &pkt->src, &pkt->dst);
     }
-    return -1;
+    pthread_mutex_unlock(&(flow->mFlow));
+
+    return ret;
 }
 
 void printFlowInfo(Flow *flow) {
     DBGPRINTF("\n\n########## FLOW INFO ##########\n");
+    pthread_mutex_lock(&(flow->mFlow));
 
     DBGPRINTF("flow->src: %0X %0X %0X %0X\n",
               flow->src.addr_data32[0],
@@ -375,6 +403,7 @@ void printFlowInfo(Flow *flow) {
     DBGPRINTF("flow->nextFlow: %p\n", flow->nextFlow);
 
     DBGPRINTF("\n\n########## END ##########\n");
+    pthread_mutex_unlock(&(flow->mFlow));
 
     return;
 }

@@ -35,9 +35,8 @@
 #ifdef __FreeBSD__
 #include <netinet/in.h>
 #include <sys/socket.h>
-#else
-#include <arpa/inet.h>
 #endif
+#include <arpa/inet.h>
 
 /* Port is just a uint16_t */
 typedef uint16_t Port;

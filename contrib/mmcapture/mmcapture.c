@@ -53,6 +53,7 @@
 #include "flow.h"
 #include "tcp_sessions.h"
 #include "yara_utils.h"
+#include "workers.h"
 
 MODULE_TYPE_OUTPUT
 MODULE_TYPE_NOKEEP
@@ -73,6 +74,7 @@ typedef struct instanceData_s {
     StreamsCnf *globalStreamsCnf;
     FlowCnf *globalFlowCnf;
     YaraCnf *globalYaraCnf;
+    WorkersCnf *workersCnf;
     FileStruct *logFile;
 } instanceData;
 
@@ -102,6 +104,91 @@ static struct cnfparamblk actpblk = {
     sizeof(actpdescr)/sizeof(struct cnfparamdescr),
     actpdescr
 };
+
+/* workers context */
+typedef struct WorkerDataContext_ {
+    smsg_t *pMsg;
+    instanceData *instanceData;
+
+} WorkerDataContext;
+
+void *workerDoWork(void *pData) {
+    WorkerDataContext *context = (WorkerDataContext *)pData;
+    int ret;
+
+    Packet *pkt = getImpcapData(context->pMsg);
+    msgDestruct(&(context->pMsg));
+
+//    pkt->enterTime = datetime.GetTime(NULL);
+
+    pkt->hash = calculatePacketFlowHash(pkt);
+
+//    printPacketInfo(pkt);
+
+    if(pkt->flags & PKT_HASH_READY && context->instanceData->globalYaraCnf->scanType == SCAN_STREAM) {
+        pkt->flow = getOrCreateFlowFromHash(pkt);
+
+        if(pkt->flow && pkt->proto == IPPROTO_TCP) {
+            pthread_mutex_lock(&(pkt->flow->mFlow));
+            ret = handleTcpFromPacket(pkt);
+            pthread_mutex_unlock(&(pkt->flow->mFlow));
+
+//            if(ret == 1) {
+//                /* session is now closed */
+//                TcpSession *session = (TcpSession *) pkt->flow->protoCtx;
+//                tcpSessionDelete(session);
+//                pkt->flow->protoCtx = NULL;
+//            }
+        }
+    }
+
+    if(pkt->payloadLen) {
+        struct json_object *yaraMeta = NULL;
+
+        if(context->instanceData->globalYaraCnf->scanType == SCAN_STREAM &&
+           pkt->flow && pkt->proto == IPPROTO_TCP) {
+            StreamBuffer *sb;
+            TcpSession *session = (TcpSession *)pkt->flow->protoCtx;
+            if(getPacketFlowDirection(pkt->flow, pkt) == TO_SERVER) {
+                sb = session->cCon->streamBuffer;
+            }
+            else {
+                sb = session->sCon->streamBuffer;
+            }
+
+            yaraMeta = yaraScan(pkt->payload, pkt->payloadLen, sb);
+        }
+        else if(context->instanceData->globalYaraCnf->scanType == SCAN_PACKET_ONLY){
+            yaraMeta = yaraScan(pkt->payload, pkt->payloadLen, NULL);
+        }
+
+        if(yaraMeta) {
+            if(context->instanceData->logFile->pFile) {
+                struct fjson_object *jsonLine = fjson_object_new_object();
+                struct syslogTime detectionTime;
+                char detectionTimeStr[64];
+                datetime.getCurrTime(&detectionTime, NULL, 1);
+                datetime.formatTimestamp3339(&detectionTime, detectionTimeStr);
+                fjson_object_object_add(jsonLine, "ID", fjson_object_new_int(pkt->pktNumber));
+                fjson_object_object_add(jsonLine, "time_detected", fjson_object_new_string(detectionTimeStr));
+                fjson_object_object_add(jsonLine, "net_src_ip", fjson_object_new_string(getAddrString(pkt->src)));
+                fjson_object_object_add(jsonLine, "net_dst_ip", fjson_object_new_string(getAddrString(pkt->dst)));
+
+                fjson_object_object_add(jsonLine, "", yaraMeta);
+
+                appendLineToFile(fjson_object_to_json_string(jsonLine), context->instanceData->logFile);
+            }
+            else {
+                DBGPRINTF("could not write yara rule match to file: no file defined\n");
+            }
+        }
+    }
+
+    DBGPRINTF("freeing packet\n");
+    freePacket(pkt);
+
+    return NULL;
+}
 
 /* init instance, set parameters */
 
@@ -141,6 +228,7 @@ CODESTARTcreateInstance
     pData->globalStreamsCnf = calloc(1, sizeof(StreamsCnf));
     pData->globalFlowCnf = calloc(1, sizeof(FlowCnf));
     pData->globalYaraCnf = calloc(1, sizeof(YaraCnf));
+    pData->workersCnf = calloc(1, sizeof(WorkersCnf));
     pData->logFile = createFileStruct();
 ENDcreateInstance
 
@@ -155,6 +243,7 @@ CODESTARTfreeInstance
     streamDeleteConfig(pData->globalStreamsCnf);
     flowDeleteConfig(pData->globalFlowCnf);
     yaraDeleteConfig(pData->globalYaraCnf);
+    workersDeleteConfig(pData->workersCnf);
     deleteFileStruct(pData->logFile);
 ENDfreeInstance
 
@@ -179,6 +268,10 @@ CODE_STD_STRING_REQUESTnewActInst(1)
     flowInitConfig(pData->globalFlowCnf);
     yaraInitConfig(pData->globalYaraCnf);
     streamInitConfig(pData->globalStreamsCnf);
+    if(workersInitConfig(pData->workersCnf)) {
+        ABORT_FINALIZE(RS_RET_MODULE_LOAD_ERR_INIT_FAILED);
+    }
+    pData->workersCnf->workFunction = workerDoWork;
 
     for(i = 0; i < actpblk.nParams; ++i) {
         if(!pvals[i].bUsed)
@@ -255,6 +348,18 @@ CODE_STD_STRING_REQUESTnewActInst(1)
         free(pData->globalStreamsCnf->streamStoreFolder);
     }
 
+    addWorkerToConf(pData->workersCnf);
+    addWorkerToConf(pData->workersCnf);
+    addWorkerToConf(pData->workersCnf);
+    addWorkerToConf(pData->workersCnf);
+    addWorkerToConf(pData->workersCnf);
+    addWorkerToConf(pData->workersCnf);
+    addWorkerToConf(pData->workersCnf);
+    addWorkerToConf(pData->workersCnf);
+    addWorkerToConf(pData->workersCnf);
+    addWorkerToConf(pData->workersCnf);
+    addWorkerToConf(pData->workersCnf);
+    addWorkerToConf(pData->workersCnf);
 
 CODE_STD_FINALIZERnewActInst
 ENDnewActInst
@@ -270,74 +375,15 @@ BEGINdoAction_NoStrings
 CODESTARTdoAction
     pData = pWrkrData->pData;
 
-    Packet *pkt = getImpcapData(pMsg);
+    WorkerDataContext *context = malloc(sizeof(WorkerDataContext));
+    context->pMsg = MsgDup(pMsg);
+    context->instanceData = pData;
 
-    pkt->enterTime = datetime.GetTime(NULL);
+    WorkerData *work = malloc(sizeof(WorkerData));
+    work->pData = (void *)context;
+    work->next = NULL;
+    addWork(work, pData->workersCnf->sync);
 
-    pkt->hash = calculatePacketFlowHash(pkt);
-
-//    printPacketInfo(pkt);
-
-    if(pkt->flags & PKT_HASH_READY) {
-        pkt->flow = getOrCreateFlowFromHash(pkt);
-
-        if(pkt->flow && pkt->proto == IPPROTO_TCP) {
-            ret = handleTcpFromPacket(pkt);
-
-            if(ret == 1) {
-                /* session is now closed */
-                TcpSession *session = (TcpSession *) pkt->flow->protoCtx;
-
-                tcpSessionDelete(session);
-                pkt->flow->protoCtx = NULL;
-            }
-        }
-    }
-
-    if(pkt->payloadLen) {
-        struct json_object *yaraMeta = NULL;
-
-        if(pData->globalYaraCnf->scanType == SCAN_STREAM &&
-        pkt->flow && pkt->proto == IPPROTO_TCP) {
-            StreamBuffer *sb;
-            TcpSession *session = (TcpSession *)pkt->flow->protoCtx;
-            if(getPacketFlowDirection(pkt->flow, pkt) == TO_SERVER) {
-                sb = session->cCon->streamBuffer;
-            }
-            else {
-                sb = session->sCon->streamBuffer;
-            }
-
-            yaraMeta = yaraScan(pkt->payload, pkt->payloadLen, sb);
-        }
-        else if(pData->globalYaraCnf->scanType == SCAN_PACKET_ONLY){
-            yaraMeta = yaraScan(pkt->payload, pkt->payloadLen, NULL);
-        }
-
-        if(yaraMeta) {
-            if(pData->logFile->pFile) {
-                struct fjson_object *jsonLine = fjson_object_new_object();
-                struct syslogTime detectionTime;
-                char detectionTimeStr[64];
-                datetime.getCurrTime(&detectionTime, NULL, 1);
-                datetime.formatTimestamp3339(&detectionTime, detectionTimeStr);
-                fjson_object_object_add(jsonLine, "ID", fjson_object_new_int(pkt->pktNumber));
-                fjson_object_object_add(jsonLine, "time_detected", fjson_object_new_string(detectionTimeStr));
-                fjson_object_object_add(jsonLine, "net_src_ip", fjson_object_new_string(getAddrString(pkt->src)));
-                fjson_object_object_add(jsonLine, "net_dst_ip", fjson_object_new_string(getAddrString(pkt->dst)));
-
-                fjson_object_object_add(jsonLine, "", yaraMeta);
-
-                appendLineToFile(fjson_object_to_json_string(jsonLine), pData->logFile);
-            }
-            else {
-                msgAddJSON(pMsg, (unsigned char *)YARA_METADATA, yaraMeta, 0, 0);
-            }
-        }
-    }
-
-    DBGPRINTF("freeing packet\n");
-    freePacket(pkt);
 ENDdoAction
 
 BEGINparseSelectorAct
