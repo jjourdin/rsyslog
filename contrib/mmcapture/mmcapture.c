@@ -362,6 +362,7 @@ CODE_STD_STRING_REQUESTnewActInst(1)
     addWorkerToConf(pData->workersCnf);
 
 CODE_STD_FINALIZERnewActInst
+    cnfparamvalsDestruct(pvals, &actpblk);
 ENDnewActInst
 
 /* runtime functions */
