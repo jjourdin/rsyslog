@@ -173,8 +173,11 @@ void *workerDoWork(void *pData) {
                 fjson_object_object_add(jsonLine, "time_detected", fjson_object_new_string(detectionTimeStr));
                 fjson_object_object_add(jsonLine, "net_src_ip", fjson_object_new_string(getAddrString(pkt->src)));
                 fjson_object_object_add(jsonLine, "net_dst_ip", fjson_object_new_string(getAddrString(pkt->dst)));
+                fjson_object_object_add(jsonLine, "net_src_port", fjson_object_new_int(pkt->sp));
+                fjson_object_object_add(jsonLine, "net_dst_port", fjson_object_new_int(pkt->dp));
 
-                fjson_object_object_add(jsonLine, "", yaraMeta);
+
+                fjson_object_object_add(jsonLine, "yara_match", yaraMeta);
 
                 appendLineToFile(fjson_object_to_json_string(jsonLine), context->instanceData->logFile);
             }
