@@ -330,11 +330,16 @@ CODE_STD_STRING_REQUESTnewActInst(1)
             DBGPRINTF("streamStoreFolder set to '%s'\n", pData->globalStreamsCnf->streamStoreFolder);
         }
         else if(!strcmp(actpblk.descr[i].name, "logFile")) {
-            strncpy(pData->logFile->fileFullPath, es_str2cstr(pvals[i].val.d.estr, NULL), 256);
-            FILE *logFile = openFile(dirname(pData->logFile->fileFullPath), basename(pData->logFile->fileFullPath));
+            char *fileFullPath = es_str2cstr(pvals[i].val.d.estr, NULL);
+            strncpy(pData->logFile->filename, basename(fileFullPath), 256);
+            strncpy(pData->logFile->directory, dirname(fileFullPath), 2048);
+            free(fileFullPath);
+            DBGPRINTF("logFile directory: %s\n", pData->logFile->directory);
+            DBGPRINTF("logFile filename: %s\n", pData->logFile->filename);
+            FILE *logFile = openFile(pData->logFile->directory, pData->logFile->filename);
             if(logFile) {
                 pData->logFile->pFile = logFile;
-                DBGPRINTF("logFile '%s' opened\n", pData->logFile->fileFullPath);
+                fclose(pData->logFile->pFile);
             }
         }
         else {
@@ -348,18 +353,6 @@ CODE_STD_STRING_REQUESTnewActInst(1)
         free(pData->globalStreamsCnf->streamStoreFolder);
     }
 
-    addWorkerToConf(pData->workersCnf);
-    addWorkerToConf(pData->workersCnf);
-    addWorkerToConf(pData->workersCnf);
-    addWorkerToConf(pData->workersCnf);
-    addWorkerToConf(pData->workersCnf);
-    addWorkerToConf(pData->workersCnf);
-    addWorkerToConf(pData->workersCnf);
-    addWorkerToConf(pData->workersCnf);
-    addWorkerToConf(pData->workersCnf);
-    addWorkerToConf(pData->workersCnf);
-    addWorkerToConf(pData->workersCnf);
-    addWorkerToConf(pData->workersCnf);
 
 CODE_STD_FINALIZERnewActInst
     cnfparamvalsDestruct(pvals, &actpblk);
@@ -375,6 +368,24 @@ BEGINdoAction_NoStrings
     instanceData *pData;
 CODESTARTdoAction
     pData = pWrkrData->pData;
+
+    if(pData->workersCnf->workersNumber == 0) {
+        pData->logFile->pFile = openFile(pData->logFile->directory, pData->logFile->filename);
+        workersStartSynchroniser(pData->workersCnf);
+
+        addWorkerToConf(pData->workersCnf);
+        addWorkerToConf(pData->workersCnf);
+        addWorkerToConf(pData->workersCnf);
+        addWorkerToConf(pData->workersCnf);
+        addWorkerToConf(pData->workersCnf);
+        addWorkerToConf(pData->workersCnf);
+        addWorkerToConf(pData->workersCnf);
+        addWorkerToConf(pData->workersCnf);
+        addWorkerToConf(pData->workersCnf);
+        addWorkerToConf(pData->workersCnf);
+        addWorkerToConf(pData->workersCnf);
+        addWorkerToConf(pData->workersCnf);
+    }
 
     WorkerDataContext *context = malloc(sizeof(WorkerDataContext));
     context->pMsg = MsgDup(pMsg);

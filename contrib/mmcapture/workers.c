@@ -258,11 +258,29 @@ static inline void *synchroniserWork(void *pData) {
     pthread_exit(0);
 }
 
-int workersInitConfig(WorkersCnf *conf) {
-    DBGPRINTF("workersInitConfig\n");
+int workersStartSynchroniser(WorkersCnf *conf) {
+    DBGPRINTF("workersStartSynchroniser\n");
     pthread_attr_t attr;
     pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+
+    DBGPRINTF("starting synchroniser\n");
+    if(pthread_create(&(conf->sync->thread), &attr, synchroniserWork, (void *)conf->sync) != 0) {
+        DBGPRINTF("failed to start synchroniser\n");
+        pthread_attr_destroy(&attr);
+        pthread_mutex_destroy(&(conf->sync->mSignal));
+        pthread_cond_destroy(&(conf->sync->cSignal));
+        free(conf->sync);
+        return -1;
+    }
+
+    DBGPRINTF("synchroniser started successfully\n");
+    pthread_attr_destroy(&attr);
+    return 0;
+}
+
+int workersInitConfig(WorkersCnf *conf) {
+    DBGPRINTF("workersInitConfig\n");
 
     conf->maxWorkers = DEFAULT_MAX_WORKERS;
 
@@ -277,18 +295,7 @@ int workersInitConfig(WorkersCnf *conf) {
     pthread_mutex_init(&(newSync->mSignal), NULL);
     pthread_cond_init(&(newSync->cSignal), NULL);
 
-    DBGPRINTF("starting synchroniser\n");
-    if(pthread_create(&(newSync->thread), &attr, synchroniserWork, (void *)newSync) != 0) {
-        DBGPRINTF("failed to start config synchroniser\n");
-        pthread_attr_destroy(&attr);
-        pthread_mutex_destroy(&(newSync->mSignal));
-        pthread_cond_destroy(&(newSync->cSignal));
-        free(newSync);
-        return -1;
-    }
-
     conf->sync = newSync;
-    pthread_attr_destroy(&attr);
     return 0;
 }
 

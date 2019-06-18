@@ -92,6 +92,7 @@ typedef struct WorkersCnf_ {
 int addWorkerToConf(WorkersCnf *);
 int removeWorkerFromConf(Worker *, WorkersCnf *);
 void addWork(WorkerData *, Synchroniser *);
+int workersStartSynchroniser(WorkersCnf *);
 int workersInitConfig(WorkersCnf *);
 void workersDeleteConfig(WorkersCnf *);
 void workerPing(void *);

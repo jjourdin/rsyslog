@@ -67,6 +67,8 @@ void addDataToFile(char* pData, uint32_t sizeData, uint32_t offSet, FileStruct* 
 }
 
 void appendLineToFile(char *pLine, FileStruct *file) {
+    DBGPRINTF("appendLineToFile: %s/%s\n", file->directory, file->filename);
+
     int lineLength = strlen(pLine);
 
     pthread_mutex_lock(&(file->mFile));
@@ -209,14 +211,16 @@ int createFolder(char* folder){
 FileStruct *createFileStruct() {
     FileStruct *newFile = calloc(1, sizeof(FileStruct));
     pthread_mutex_init(&(newFile->mFile), NULL);
-    newFile->fileFullPath = malloc(256);
+    newFile->directory = malloc(2048);
+    newFile->filename = malloc(256);
     return newFile;
 }
 
 void deleteFileStruct(FileStruct *file) {
     if(file) {
         pthread_mutex_destroy(&(file->mFile));
-        free(file->fileFullPath);
+        free(file->directory);
+        free(file->filename);
         if(file->pFile) fclose(file->pFile);
         free(file);
     }

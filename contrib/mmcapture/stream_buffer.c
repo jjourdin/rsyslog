@@ -99,7 +99,8 @@ int linkStreamBufferToDumpFile(StreamBuffer *sb, char *filename) {
         FILE *opened = openFile(streamsCnf->streamStoreFolder, filename);
         if(!opened) return -1;
 
-        strncpy(sb->bufferDump->fileFullPath, filename, 256);
+        strncpy(sb->bufferDump->filename, filename, 256);
+        strncpy(sb->bufferDump->directory, streamsCnf->streamStoreFolder, 2048);
         sb->bufferDump->pFile = opened;
     }
     return 0;

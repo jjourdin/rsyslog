@@ -45,7 +45,8 @@
 #define FILE_UTILS_H
 
 typedef struct FileStruct_ {
-    char *fileFullPath;
+    char *directory;
+    char *filename;
     FILE *pFile;
     pthread_mutex_t mFile;
     uint32_t size;
