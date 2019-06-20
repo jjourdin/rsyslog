@@ -28,23 +28,11 @@
 
 #include "tcp_sessions.h"
 
-static inline void tcpConnectionPushToQueue(TcpConnection *connection, TcpQueue *newQueue) {
-    DBGPRINTF("tcpConnectionPushToQueue\n");
-
-    if(connection->queue) {
-        newQueue->next = connection->queue;
-        connection->queue->prev = newQueue;
-    }
-    connection->queue = newQueue;
-
-    return;
-}
-
 static inline void tcpQueueListDelete(TcpQueue *head) {
     DBGPRINTF("tcpQueueListDelete\n");
 
     if(head) {
-        if(head->next) tcpQueueListDelete(head->next);
+        if(head->prev) tcpQueueListDelete(head->prev);
 
         if(head->data) free(head->data);
         free(head);
@@ -76,7 +64,7 @@ static inline void tcpConnectionDelete(TcpConnection *tcpConnection) {
 
     if(tcpConnection) {
         streamBufferDelete(tcpConnection->streamBuffer);
-        tcpQueueListDelete(tcpConnection->queue);
+        tcpQueueListDelete(tcpConnection->queueHead);
         free(tcpConnection);
     }
 
@@ -160,6 +148,8 @@ int tcpSessionInitFromPacket(TcpSession *tcpSession, Packet *pkt) {
 
             srcCon->initSeq = header->seq;
             srcCon->lastAck = header->ack;
+            srcCon->sPort = pkt->sp;
+            dstCon->sPort = pkt->dp;
             tcpSession->flow = pkt->flow;
 
             strncpy(flags, header->flags, 10);
@@ -212,9 +202,11 @@ int tcpSessionInitFromPacket(TcpSession *tcpSession, Packet *pkt) {
 }
 
 int tcpConnectionsUpdateFromQueueElem(TcpConnection *srcCon, TcpConnection *dstCon, TcpQueue *queue) {
-    DBGPRINTF("tcpConnectionsUpdateFromQueueElem\n");
+    DBGPRINTF("tcpConnectionsUpdateFromQueueElem: updating for packet seq=%X\n", queue->seq);
 
     if(queue && srcCon && dstCon) {
+        queue->used = 1;
+
         char flags[10];
         uint32_t tcpDataLength = queue->dataLength;
 
@@ -296,24 +288,45 @@ int tcpConnectionsUpdateFromQueueElem(TcpConnection *srcCon, TcpConnection *dstC
     return -1;
 }
 
-static inline int tcpConnectionCanPopFromQueue(TcpConnection *connection) {
-    DBGPRINTF("tcpConnectionCanPopFromQueue\n");
+static inline void tcpConnectionInsertToQueue(TcpConnection *connection, TcpQueue *newElem) {
+    DBGPRINTF("tcpConnectionInsertToQueue");
 
-    if(connection->queue) {
-        if(connection->state > TCP_LISTEN) return connection->nextSeq == connection->queue->seq;
-        else return 1;
+    if(connection && newElem) {
+        TcpQueue *scan;
+        for(scan = connection->queueHead; scan != NULL && newElem->seq < scan->seq; scan = scan->prev) {}
+        if(scan) {
+            newElem->next = scan->next;
+            newElem->prev = scan;
+            if(scan->next) scan->next->prev = newElem;
+            else connection->queueHead = newElem;
+            scan->next = newElem;
+        }
+        else {
+            if(connection->queueTail) {
+                connection->queueTail->prev = newElem;
+                newElem->next = connection->queueTail;
+            }
+            connection->queueTail = newElem;
+        }
+        if(!connection->queueHead) connection->queueHead = newElem;
+    }
+    else {
+        DBGPRINTF("tcpConnectionInsertToQueue: [ERROR] connection or newElem are NULL\n");
     }
 
-    return 0;
+    return;
 }
 
 static inline TcpQueue *tcpConnectionGetNextInQueue(TcpConnection *connection) {
     DBGPRINTF("tcpConnectionGetNextInQueue\n");
 
-    TcpQueue *scan = connection->queue;
+    if(connection->state <= TCP_LISTEN) return connection->queueTail;
+
+    TcpQueue *scan = connection->queueHead;
     while(scan != NULL) {
-        if(connection->nextSeq == scan->seq) return scan;
-        scan = scan->next;
+        if(connection->nextSeq == scan->seq && !scan->used) return scan;
+        if(scan->seq < connection->nextSeq) return NULL;
+        scan = scan->prev;
     }
 
     return NULL;
@@ -323,22 +336,33 @@ static inline int tcpQueueRemoveFromConnection(TcpConnection *connection, TcpQue
     DBGPRINTF("tcpQueueRemoveFromConnection\n");
 
     if(queue) {
-        if(queue->prev) {
-            queue->prev->next = queue->next;
-        }
-        if(queue->next) {
-            queue->next->prev = queue->prev;
-        }
+        if(queue->prev) queue->prev->next = queue->next;
+        if(queue->next) queue->next->prev = queue->prev;
 
-        if(connection->queue == queue) {
-            connection->queue = queue->next;
-        }
+        if(connection->queueHead == queue) connection->queueHead = queue->prev;
+        if(connection->queueTail == queue) connection->queueTail = queue->next;
 
         if(queue->data) free(queue->data);
         free(queue);
         return 0;
     }
     return 1;
+}
+
+TcpConnection *getTcpSrcConnectionFromPacket(TcpSession *session, Packet *pkt) {
+    if(session && pkt) {
+        if(session->cCon->sPort == pkt->sp) return session->cCon;
+        else if(session->sCon->sPort == pkt->sp) return session->sCon;
+    }
+    return NULL;
+}
+
+TcpConnection *getTcpDstConnectionFromPacket(TcpSession *session, Packet *pkt) {
+    if(session && pkt) {
+        if(session->cCon->sPort == pkt->dp) return session->cCon;
+        else if(session->sCon->sPort == pkt->dp) return session->sCon;
+    }
+    return NULL;
 }
 
 int handleTcpFromPacket(Packet *pkt) {
@@ -353,26 +377,23 @@ int handleTcpFromPacket(Packet *pkt) {
             if(!session) {
                 session = tcpSessionCreate();
                 tcpSessionInitFromPacket(session, pkt);
+                TcpQueue *tcpQueue = packetEnqueue(pkt);
+                tcpConnectionInsertToQueue(session->cCon, tcpQueue);
+                tcpQueue->used = 1;
                 pkt->flow->protoCtx = (void *)session;
             }
             else
             {
                 TcpConnection *srcCon, *dstCon;
                 TcpQueue *tcpQueue = packetEnqueue(pkt);
-                if(getPacketFlowDirection(pkt->flow, pkt) == TO_SERVER) {
-                    srcCon = session->cCon;
-                    dstCon = session->sCon;
-                }
-                else {
-                    srcCon = session->sCon;
-                    dstCon = session->cCon;
-                }
+                srcCon = getTcpSrcConnectionFromPacket(session, pkt);
+                dstCon = getTcpDstConnectionFromPacket(session, pkt);
 
-                tcpConnectionPushToQueue(srcCon, tcpQueue);
-                if(tcpConnectionCanPopFromQueue(srcCon)) {
+                tcpConnectionInsertToQueue(srcCon, tcpQueue);
+                tcpQueue = tcpConnectionGetNextInQueue(srcCon);
+                if(tcpQueue) {
                     do {
                         ret = tcpConnectionsUpdateFromQueueElem(srcCon, dstCon, tcpQueue);
-                        tcpQueueRemoveFromConnection(srcCon, tcpQueue);
                         tcpQueue = tcpConnectionGetNextInQueue(srcCon);
                     }while(tcpQueue && !ret);
                 }
@@ -418,8 +439,9 @@ void printTcpQueueInfo(TcpQueue *queue) {
     DBGPRINTF("tcpQueue->seq: %X\n", queue->seq);
     DBGPRINTF("tcpQueue->ack: %X\n", queue->ack);
     DBGPRINTF("tcpQueue->dataLength: %u\n", queue->dataLength);
+    DBGPRINTF("tcpQueue->used: %u\n", queue->used);
 
-    if(queue->next) printTcpQueueInfo(queue->next);
+    if(queue->prev) printTcpQueueInfo(queue->prev);
 
     DBGPRINTF("\n\n########## END TCPQUEUE INFO ##########\n");
     return;
@@ -428,12 +450,13 @@ void printTcpQueueInfo(TcpQueue *queue) {
 void printTcpConnectionInfo(TcpConnection *connection) {
     DBGPRINTF("\n\n########## TCPCONNECTION INFO ##########\n");
 
+    DBGPRINTF("connection->sPort: %u\n", connection->sPort);
     DBGPRINTF("connection->state: %u\n", connection->state);
     DBGPRINTF("connection->initSeq: %X\n", connection->initSeq);
     DBGPRINTF("connection->nextSeq: %X\n", connection->nextSeq);
     DBGPRINTF("connection->lastAck: %X\n", connection->lastAck);
 
-    if(connection->queue) printTcpQueueInfo(connection->queue);
+    if(connection->queueHead) printTcpQueueInfo(connection->queueHead);
     if(connection->streamBuffer) printStreamBufferInfo(connection->streamBuffer);
 
     DBGPRINTF("\n\n########## END TCPCONNECTION INFO ##########\n");

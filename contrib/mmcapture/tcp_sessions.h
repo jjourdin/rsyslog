@@ -51,6 +51,7 @@ typedef struct TcpQueue_ {
     uint32_t ack;
     uint32_t dataLength;
     uint8_t *data;
+    uint8_t used;
     struct TcpQueue_ *prev;
     struct TcpQueue_ *next;
 } TcpQueue;
@@ -72,12 +73,14 @@ enum tcpState
 };
 
 typedef struct TcpConnection_{
+    Port sPort;
     enum tcpState state;
     uint32_t initSeq;
     uint32_t nextSeq;
     uint32_t lastAck;
     StreamBuffer *streamBuffer;
-    TcpQueue *queue;
+    TcpQueue *queueHead;
+    TcpQueue *queueTail;
 } TcpConnection;
 
 typedef struct TcpSession_{
