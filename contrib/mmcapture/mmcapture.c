@@ -119,7 +119,7 @@ void *workerDoWork(void *pData) {
     Packet *pkt = getImpcapData(context->pMsg);
     msgDestruct(&(context->pMsg));
 
-//    pkt->enterTime = datetime.GetTime(NULL);
+    pkt->enterTime = datetime.GetTime(NULL);
 
     pkt->hash = calculatePacketFlowHash(pkt);
 
@@ -374,7 +374,6 @@ CODESTARTdoAction
 
     if(pData->workersCnf->workersNumber == 0) {
         pData->logFile->pFile = openFile(pData->logFile->directory, pData->logFile->filename);
-        workersStartSynchroniser(pData->workersCnf);
 
         addWorkerToConf(pData->workersCnf);
         addWorkerToConf(pData->workersCnf);
@@ -397,7 +396,7 @@ CODESTARTdoAction
     WorkerData *work = malloc(sizeof(WorkerData));
     work->pData = (void *)context;
     work->next = NULL;
-    addWork(work, pData->workersCnf->sync);
+    addWork(work, pData->workersCnf);
 
 ENDdoAction
 

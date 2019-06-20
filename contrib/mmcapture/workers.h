@@ -39,16 +39,10 @@ typedef struct Worker_ {
     pthread_t thread;
     long tid;
 
+    struct WorkersCnf_ *conf;
     void *pData;
-    void (*workFunction)(void *);
 
-    struct {
-        uint8_t bClose: 1;
-        uint8_t bWork: 1;
-    } signal;
-
-    pthread_mutex_t mSignal;
-    pthread_cond_t cSignal;
+    uint8_t sigStop;
 
     struct Worker_ *next;
     struct Worker_ *prev;
@@ -59,43 +53,27 @@ typedef struct WorkerData_ {
     struct WorkerData_ *next;
 } WorkerData;
 
-typedef struct Synchroniser_ {
-    pthread_t thread;
-
-    struct WorkersCnf_ *conf;
-
-    WorkerData *pDataListHead;
-    WorkerData *pDataListTail;
-    uint16_t listSize;
-
-    struct {
-        uint8_t bClose: 1;
-        uint8_t bWork: 1;
-    } signal;
-
-    pthread_mutex_t mSignal;
-    pthread_cond_t cSignal;
-} Synchroniser;
-
 typedef struct WorkersCnf_ {
     void (*workFunction)(void *);
-
-    Synchroniser *sync;
 
     uint8_t maxWorkers;
 #define DEFAULT_MAX_WORKERS 10
 
     Worker *workersListHead;
     uint8_t workersNumber;
+
+    WorkerData *pDataListHead;
+    WorkerData *pDataListTail;
+    uint32_t listSize;
+
+    pthread_mutex_t mSignal;
+    pthread_cond_t cSignal;
 } WorkersCnf;
 
 int addWorkerToConf(WorkersCnf *);
 int removeWorkerFromConf(Worker *, WorkersCnf *);
-void addWork(WorkerData *, Synchroniser *);
-int workersStartSynchroniser(WorkersCnf *);
+void addWork(WorkerData *, WorkersCnf *);
 int workersInitConfig(WorkersCnf *);
 void workersDeleteConfig(WorkersCnf *);
-void workerPing(void *);
-
 
 #endif /* WORKERS_H */
