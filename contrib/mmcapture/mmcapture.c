@@ -96,7 +96,8 @@ static struct cnfparamdescr actpdescr[] = {
     { "yaraRuleFile", eCmdHdlrString, 0 },
     { "yaraScanType", eCmdHdlrGetWord, 0 },
     { "yaraScanMaxSize", eCmdHdlrPositiveInt, 0 },
-    { "logFile", eCmdHdlrString, 0 }
+    { "logFile", eCmdHdlrString, 0 },
+    { "threadsNumber", eCmdHdlrPositiveInt, 0 }
 };
 
 static struct cnfparamblk actpblk = {
@@ -345,6 +346,14 @@ CODE_STD_STRING_REQUESTnewActInst(1)
                 fclose(pData->logFile->pFile);
             }
         }
+        else if(!strcmp(actpblk.descr[i].name, "threadsNumber")) {
+            pData->workersCnf->maxWorkers = (uint8_t) pvals[i].val.d.n;
+            if(pData->workersCnf->maxWorkers > 50) {
+                pData->workersCnf->maxWorkers = 50;
+                LogError(0, RS_RET_INVALID_VALUE, "mmcapture: thread limit is too high -> capped to 50\n");
+            }
+            DBGPRINTF("threads number set to %u\n", pData->workersCnf->maxWorkers);
+        }
         else {
             LogError(0, RS_RET_PARAM_ERROR, "mmcapture: unhandled parameter '%s'\n", actpblk.descr[i].name);
         }
@@ -375,18 +384,10 @@ CODESTARTdoAction
     if(pData->workersCnf->workersNumber == 0) {
         pData->logFile->pFile = openFile(pData->logFile->directory, pData->logFile->filename);
 
-        addWorkerToConf(pData->workersCnf);
-        addWorkerToConf(pData->workersCnf);
-        addWorkerToConf(pData->workersCnf);
-        addWorkerToConf(pData->workersCnf);
-        addWorkerToConf(pData->workersCnf);
-        addWorkerToConf(pData->workersCnf);
-        addWorkerToConf(pData->workersCnf);
-        addWorkerToConf(pData->workersCnf);
-        addWorkerToConf(pData->workersCnf);
-        addWorkerToConf(pData->workersCnf);
-        addWorkerToConf(pData->workersCnf);
-        addWorkerToConf(pData->workersCnf);
+        uint8_t thread;
+        for(thread = 0; thread < pData->workersCnf->maxWorkers; thread++) {
+            addWorkerToConf(pData->workersCnf);
+        }
     }
 
     WorkerDataContext *context = malloc(sizeof(WorkerDataContext));
