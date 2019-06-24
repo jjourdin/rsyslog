@@ -8,7 +8,6 @@ mmcapture_la_LIBADD = -lyara
 mmcapture_la_SOURCES += file_utils.c
 mmcapture_la_SOURCES += packets.c
 mmcapture_la_SOURCES += tcp_sessions.c
-mmcapture_la_SOURCES += smb_sessions.c
 mmcapture_la_SOURCES += flow.c
 mmcapture_la_SOURCES += extract_impcap.c
 mmcapture_la_SOURCES += hash_utils.c
