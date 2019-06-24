@@ -109,8 +109,9 @@ static inline void *workerWaitWork(void *pData) {
         if(work) {
             DBGPRINTF("WORKER [%ld] got work to do\n", self->tid);
             self->conf->workFunction(work->pData);
-            free(work->pData);
-            free(work);
+            pthread_mutex_lock(&(work->object->mutex));
+            work->object->state = AVAILABLE;
+            pthread_mutex_unlock(&(work->object->mutex));
         }
     }
 }
@@ -207,6 +208,7 @@ int workersInitConfig(WorkersCnf *conf) {
     conf->pDataListHead = NULL;
     conf->pDataListTail = NULL;
     conf->listSize = 0;
+    conf->workerDataPool = createPool();
     pthread_mutex_init(&(conf->mSignal), NULL);
     pthread_cond_init(&(conf->cSignal), NULL);
 
@@ -222,6 +224,7 @@ void workersDeleteConfig(WorkersCnf *conf) {
     }
 
     DBGPRINTF("thread joined, destroying/freeing the rest\n");
+    destroyPool(conf->workerDataPool);
     pthread_mutex_destroy(&(conf->mSignal));
     pthread_cond_destroy(&(conf->cSignal));
     free(conf);

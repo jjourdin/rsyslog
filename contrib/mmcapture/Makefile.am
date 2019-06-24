@@ -15,3 +15,4 @@ mmcapture_la_SOURCES += rand_utils.c
 mmcapture_la_SOURCES += stream_buffer.c
 mmcapture_la_SOURCES += yara_utils.c
 mmcapture_la_SOURCES += workers.c
+mmcapture_la_SOURCES += data_pool.c

@@ -31,6 +31,7 @@
 #include <stdlib.h>
 
 #include "rsyslog.h"
+#include "data_pool.h"
 
 #ifndef WORKERS_H
 #define WORKERS_H
@@ -51,6 +52,7 @@ typedef struct Worker_ {
 typedef struct WorkerData_ {
     void *pData;
     struct WorkerData_ *next;
+    DataObject *object;
 } WorkerData;
 
 typedef struct WorkersCnf_ {
@@ -65,6 +67,7 @@ typedef struct WorkersCnf_ {
     WorkerData *pDataListHead;
     WorkerData *pDataListTail;
     uint32_t listSize;
+    DataPool *workerDataPool;
 
     pthread_mutex_t mSignal;
     pthread_cond_t cSignal;

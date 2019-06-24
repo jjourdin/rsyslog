@@ -54,6 +54,7 @@
 #include "tcp_sessions.h"
 #include "yara_utils.h"
 #include "workers.h"
+#include "data_pool.h"
 
 MODULE_TYPE_OUTPUT
 MODULE_TYPE_NOKEEP
@@ -76,6 +77,8 @@ typedef struct instanceData_s {
     YaraCnf *globalYaraCnf;
     WorkersCnf *workersCnf;
     FileStruct *logFile;
+
+    DataPool *workerDataContextPool;
 } instanceData;
 
 typedef struct wrkrInstanceData {
@@ -110,6 +113,7 @@ static struct cnfparamblk actpblk = {
 typedef struct WorkerDataContext_ {
     smsg_t *pMsg;
     instanceData *instanceData;
+    DataObject *object;
 
 } WorkerDataContext;
 
@@ -188,7 +192,9 @@ void *workerDoWork(void *pData) {
         }
     }
 
-    DBGPRINTF("freeing packet\n");
+    pthread_mutex_lock(&(context->object->mutex));
+    context->object->state = AVAILABLE;
+    pthread_mutex_unlock(&(context->object->mutex));
     freePacket(pkt);
 
     return NULL;
@@ -234,6 +240,7 @@ CODESTARTcreateInstance
     pData->globalYaraCnf = calloc(1, sizeof(YaraCnf));
     pData->workersCnf = calloc(1, sizeof(WorkersCnf));
     pData->logFile = createFileStruct();
+    pData->workerDataContextPool = createPool();
 ENDcreateInstance
 
 BEGINcreateWrkrInstance
@@ -249,6 +256,7 @@ CODESTARTfreeInstance
     yaraDeleteConfig(pData->globalYaraCnf);
     workersDeleteConfig(pData->workersCnf);
     deleteFileStruct(pData->logFile);
+    destroyPool(pData->workerDataContextPool);
 ENDfreeInstance
 
 BEGINfreeWrkrInstance
@@ -262,7 +270,7 @@ BEGINnewActInst
     uint16_t i;
 CODESTARTnewActInst
     if((pvals = nvlstGetParams(lst, &actpblk, NULL)) == NULL) {
-    ABORT_FINALIZE(RS_RET_MISSING_CNFPARAMS);
+        ABORT_FINALIZE(RS_RET_MISSING_CNFPARAMS);
     }
 
 CODE_STD_STRING_REQUESTnewActInst(1)
@@ -390,11 +398,41 @@ CODESTARTdoAction
         }
     }
 
-    WorkerDataContext *context = malloc(sizeof(WorkerDataContext));
+    WorkerDataContext *context;
+    DataObject *wdcObject = getAvailableDataObject(pData->workerDataContextPool);
+    if(!wdcObject) {
+        context = malloc(sizeof(WorkerDataContext));
+        wdcObject = createDataObject(context, sizeof(WorkerDataContext));
+        addObjectToPool(pData->workerDataContextPool, wdcObject);
+        context->object = wdcObject;
+    }
+    else {
+        context = wdcObject->pObject;
+    }
+
+    pthread_mutex_lock(&(context->object->mutex));
+    context->object->state = USED;
+    pthread_mutex_unlock(&(context->object->mutex));
+
     context->pMsg = MsgDup(pMsg);
     context->instanceData = pData;
 
-    WorkerData *work = malloc(sizeof(WorkerData));
+    WorkerData *work;
+    DataObject *wdObject = getAvailableDataObject(pData->workersCnf->workerDataPool);
+    if(!wdObject) {
+        work = malloc(sizeof(WorkerData));
+        wdObject = createDataObject(work, sizeof(WorkerData));
+        addObjectToPool(pData->workersCnf->workerDataPool, wdObject);
+        work->object = wdObject;
+    }
+    else {
+        work = wdObject->pObject;
+    }
+
+    pthread_mutex_lock(&(work->object->mutex));
+    work->object->state = USED;
+    pthread_mutex_unlock(&(work->object->mutex));
+
     work->pData = (void *)context;
     work->next = NULL;
     addWork(work, pData->workersCnf);
