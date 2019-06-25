@@ -67,12 +67,24 @@ static inline int initBuffer(StreamBuffer *sb) {
     return -1;
 }
 
+void *createNewSBS(void *object) {
+    StreamBufferSegment *sbs = calloc(1, sizeof(StreamBufferSegment));
+    return (void *)sbs;
+}
+
+void *destructSBS(void *object) {
+    if(object) {
+        StreamBufferSegment *sbs = (StreamBufferSegment *)object;
+        free(sbs);
+    }
+    return;
+}
+
 void streamInitConfig(StreamsCnf *conf) {
     DBGPRINTF("streamInitConfig\n");
     memset(conf, 0, sizeof(StreamsCnf));
 
-    conf->streamStoreFolder = malloc(256);
-    strncpy(conf->streamStoreFolder, "/var/log/rsyslog/mmcapture-streams/", 256);
+    conf->sbsPool = createPool(createNewSBS, destructSBS);
 
     streamsCnf = conf;
     return;
@@ -88,6 +100,7 @@ void streamDeleteConfig(StreamsCnf *conf) {
         streamBufferDelete(delete);
     }
     if(conf->streamStoreFolder) free(conf->streamStoreFolder);
+    destroyPool(conf->sbsPool);
     free(conf);
 }
 
@@ -111,7 +124,7 @@ uint32_t streamBufferDumpToFile(StreamBuffer *sb) {
     uint32_t writeAmount = 0;
 
     if(sb->bufferDump->pFile) {
-        StreamBufferSegment *sbs = sb->sbsList;
+        StreamBufferSegment *sbs = sb->sbsListTail;
         while(sbs) {
             addDataToFile((char *)(sb->buffer + sbs->streamOffset), sbs->length, sbs->streamOffset, sb->bufferDump);
             writeAmount += sbs->length;
@@ -151,12 +164,6 @@ void streamBufferDelete(StreamBuffer *sb) {
         if(sb->buffer) free(sb->buffer);
         if(sb->ruleList) yaraDeleteRuleList(sb->ruleList);
 
-        StreamBufferSegment *sbsFree, *sbs = sb->sbsList;
-        while(sbs) {
-            sbsFree = sbs;
-            sbs = sbs->next;
-            free(sbsFree);
-        }
         free(sb);
     }
 }
@@ -202,12 +209,17 @@ int streamBufferAddDataSegment(StreamBuffer *sb, uint32_t offset, uint32_t dataL
         memmove(sb->buffer + offset, data, dataLength);
         sb->bufferFill = (offset+dataLength > sb->bufferFill) ? offset+dataLength : sb->bufferFill;
 
-        StreamBufferSegment *sbs = calloc(1, sizeof(StreamBufferSegment));
+        DataObject *sbsObj = getOrCreateAvailableObject(streamsCnf->sbsPool);
+        if(!sbsObj) return -1;
+        StreamBufferSegment *sbs = sbsObj->pObject;
         sbs->streamOffset = offset;
         sbs->length = dataLength;
 
-        sbs->next = sb->sbsList;
-        sb->sbsList = sbs;
+        sbs->prev = sb->sbsListHead;
+        if(sb->sbsListHead) sb->sbsListHead->next = sbs;
+        sb->sbsListHead = sbs;
+        if(!sb->sbsListTail) sb->sbsListTail = sbs;
+        sbs->next = NULL;
         sb->sbsNumber++;
 
         return 0;
@@ -222,8 +234,8 @@ void printStreamBufferInfo(StreamBuffer *sb) {
     DBGPRINTF("sb->bufferSize: %u\n", sb->bufferSize);
     DBGPRINTF("sb->bufferFill: %u\n", sb->bufferFill);
     DBGPRINTF("sb->sbsNumber: %u\n", sb->sbsNumber);
-    if(sb->sbsList) {
-        printStreamBufferSegmentInfo(sb->sbsList);
+    if(sb->sbsListTail) {
+        printStreamBufferSegmentInfo(sb->sbsListTail);
     }
 
     DBGPRINTF("\n\n########## END SB INFO ##########\n");

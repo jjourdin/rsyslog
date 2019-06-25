@@ -33,6 +33,7 @@
 
 #include "rsyslog.h"
 #include "file_utils.h"
+#include "data_pool.h"
 
 #define DEFAULT_BUFF_START_SIZE     4096
 #define BUFF_ADD_BLOCK_SIZE         4096
@@ -41,6 +42,8 @@ typedef struct StreamsCnf_ {
     char *streamStoreFolder;
     uint32_t streamNumber;
     struct StreamBuffer_ *listHead;
+
+    DataPool *sbsPool;
 } StreamsCnf;
 
 extern StreamsCnf *streamsCnf;
@@ -48,7 +51,10 @@ extern StreamsCnf *streamsCnf;
 typedef struct StreamBufferSegment_ {
     uint32_t length;
     uint32_t streamOffset;
+    struct StreamBufferSegment_ *prev;
     struct StreamBufferSegment_ *next;
+
+    DataObject *object;
 } StreamBufferSegment;
 
 typedef struct StreamBuffer_ {
@@ -59,7 +65,8 @@ typedef struct StreamBuffer_ {
     struct YaraRuleList_ *ruleList;
 
     uint32_t sbsNumber;
-    StreamBufferSegment *sbsList;
+    StreamBufferSegment *sbsListHead;
+    StreamBufferSegment *sbsListTail;
 
     FileStruct *bufferDump;
 
