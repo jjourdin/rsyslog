@@ -76,6 +76,8 @@ typedef struct WorkersCnf_ {
 int addWorkerToConf(WorkersCnf *);
 int removeWorkerFromConf(Worker *, WorkersCnf *);
 void addWork(WorkerData *, WorkersCnf *);
+void *createWorkerData(void *);
+void *destroyWorkerData(void *);
 int workersInitConfig(WorkersCnf *);
 void workersDeleteConfig(WorkersCnf *);
 

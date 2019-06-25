@@ -117,11 +117,26 @@ typedef struct WorkerDataContext_ {
 
 } WorkerDataContext;
 
+void *createWorkerDataContext(void *object) {
+    DBGPRINTF("createWorkerDataContext\n");
+    WorkerDataContext *context = calloc(1, sizeof(WorkerDataContext));
+    context->object = object;
+    return (void *)context;
+}
+
+void *destroyWorkerDataContext(void *object) {
+    DBGPRINTF("destroyWorkerDataContext\n");
+    if(object) free(object);
+    return;
+}
+
 void *workerDoWork(void *pData) {
     WorkerDataContext *context = (WorkerDataContext *)pData;
     int ret;
 
+    DBGPRINTF("getting impcap data\n")
     Packet *pkt = getImpcapData(context->pMsg);
+    DBGPRINTF("destructing message\n")
     msgDestruct(&(context->pMsg));
 
     pkt->enterTime = datetime.GetTime(NULL);
@@ -240,7 +255,7 @@ CODESTARTcreateInstance
     pData->globalYaraCnf = calloc(1, sizeof(YaraCnf));
     pData->workersCnf = calloc(1, sizeof(WorkersCnf));
     pData->logFile = createFileStruct();
-    pData->workerDataContextPool = createPool();
+    pData->workerDataContextPool = createPool(createWorkerDataContext, destroyWorkerDataContext);
 ENDcreateInstance
 
 BEGINcreateWrkrInstance
@@ -390,6 +405,7 @@ CODESTARTdoAction
     pData = pWrkrData->pData;
 
     if(pData->workersCnf->workersNumber == 0) {
+        DBGPRINTF("launching workers\n");
         pData->logFile->pFile = openFile(pData->logFile->directory, pData->logFile->filename);
 
         uint8_t thread;
@@ -398,40 +414,30 @@ CODESTARTdoAction
         }
     }
 
+    DBGPRINTF("getting WorkerDataContext object\n");
+    DataObject *wdcObject = getOrCreateAvailableObject(pData->workerDataContextPool);
     WorkerDataContext *context;
-    DataObject *wdcObject = getAvailableDataObject(pData->workerDataContextPool);
-    if(!wdcObject) {
-        context = malloc(sizeof(WorkerDataContext));
-        wdcObject = createDataObject(context, sizeof(WorkerDataContext));
-        addObjectToPool(pData->workerDataContextPool, wdcObject);
-        context->object = wdcObject;
-    }
-    else {
+    if(wdcObject) {
+        DBGPRINTF("ok\n");
         context = wdcObject->pObject;
     }
-
-    pthread_mutex_lock(&(context->object->mutex));
-    context->object->state = USED;
-    pthread_mutex_unlock(&(context->object->mutex));
+    else {
+        DBGPRINTF("ERROR: WorkerDataContext NULL\n");
+    }
 
     context->pMsg = MsgDup(pMsg);
     context->instanceData = pData;
 
+    DBGPRINTF("getting WorkerData object\n");
+    DataObject *wdObject = getOrCreateAvailableObject(pData->workersCnf->workerDataPool);
     WorkerData *work;
-    DataObject *wdObject = getAvailableDataObject(pData->workersCnf->workerDataPool);
-    if(!wdObject) {
-        work = malloc(sizeof(WorkerData));
-        wdObject = createDataObject(work, sizeof(WorkerData));
-        addObjectToPool(pData->workersCnf->workerDataPool, wdObject);
-        work->object = wdObject;
-    }
-    else {
+    if(wdObject) {
+        DBGPRINTF("ok\n");
         work = wdObject->pObject;
     }
-
-    pthread_mutex_lock(&(work->object->mutex));
-    work->object->state = USED;
-    pthread_mutex_unlock(&(work->object->mutex));
+    else {
+        DBGPRINTF("ERROR: WorkerData NULL\n");
+    }
 
     work->pData = (void *)context;
     work->next = NULL;

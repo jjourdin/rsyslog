@@ -36,7 +36,6 @@
 
 typedef struct DataObject_ {
     void *pObject;
-    uint32_t size;
 
     enum {
         EMPTY,
@@ -56,13 +55,14 @@ typedef struct DataPool_ {
     struct DataObject_ *tail;
     uint32_t listSize;
 
+    void* (*objectConstructor)(void *);
+    void* (*objectDestructor)(void *);
+
     pthread_mutex_t mutex;
 } DataPool;
 
-DataObject *createDataObject(void *, size_t);
-DataObject *getAvailableDataObject(DataPool *);
-void addObjectToPool(DataPool *, DataObject *);
-DataPool *createPool();
+DataObject *getOrCreateAvailableObject(DataPool *);
+DataPool *createPool(void* (*objectConstructor(void *)), void* (*objectDestructor(void *)));
 void destroyPool(DataPool *);
 
 #endif /* DATA_POOL_H */

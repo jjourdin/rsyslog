@@ -25,44 +25,23 @@
  */
 #include "data_pool.h"
 
-DataObject *createDataObject(void *pObject, size_t objectSize) {
-    if(pObject && objectSize > 0) {
-        DataObject *newDataObject = calloc(1, sizeof(DataObject));
-        if(newDataObject) {
-            newDataObject->pObject = pObject;
-            newDataObject->size = objectSize;
-            newDataObject->state = INIT;
-            pthread_mutex_init(&(newDataObject->mutex), NULL);
-            return newDataObject;
-        }
-        DBGPRINTF("ERROR: could not create new Data Object\n");
+static inline DataObject *createDataObject() {
+    DBGPRINTF("createDataObject\n");
+
+    DataObject *newDataObject = calloc(1, sizeof(DataObject));
+    if(newDataObject) {
+        newDataObject->state = INIT;
+        pthread_mutex_init(&(newDataObject->mutex), NULL);
+        return newDataObject;
     }
+
+    DBGPRINTF("ERROR: could not create new Data Object\n");
     return NULL;
 }
 
+static inline void addObjectToPool(DataPool *pool, DataObject *object) {
+    DBGPRINTF("addObjectToPool\n");
 
-DataObject *getAvailableDataObject(DataPool *pool) {
-    DBGPRINTF("getAvailableDataObject\n");
-
-    pthread_mutex_lock(&(pool->mutex));
-
-    DataObject *object = pool->tail;
-    while(object) {
-        pthread_mutex_lock(&(object->mutex));
-        if(object->state == AVAILABLE) {
-            pthread_mutex_unlock(&(object->mutex));
-            break;
-        }
-        pthread_mutex_unlock(&(object->mutex));
-        object = object->next;
-    }
-
-    pthread_mutex_unlock(&(pool->mutex));
-
-    return object;
-}
-
-void addObjectToPool(DataPool *pool, DataObject *object) {
     pthread_mutex_lock(&(pool->mutex));
 
     if(pool->head) {
@@ -79,22 +58,61 @@ void addObjectToPool(DataPool *pool, DataObject *object) {
     return;
 }
 
-DataPool *createPool() {
+DataObject *getOrCreateAvailableObject(DataPool *pool) {
+    DBGPRINTF("getOrCreateAvailableObject, current number of objects: %d\n", pool->listSize);
+
+    pthread_mutex_lock(&(pool->mutex));
+
+    DataObject *object = pool->tail;
+    while(object) {
+        pthread_mutex_lock(&(object->mutex));
+        if(object->state == AVAILABLE) {
+            pthread_mutex_unlock(&(object->mutex));
+            break;
+        }
+        pthread_mutex_unlock(&(object->mutex));
+        object = object->next;
+    }
+
+    if(!object) {
+        object = createDataObject();
+        void *pObject = pool->objectConstructor((void *)object);
+
+        if(pObject) {
+            object->pObject = pObject;
+            addObjectToPool(pool, object);
+        }
+    }
+
+    object->state = USED;
+
+    pthread_mutex_unlock(&(pool->mutex));
+
+    return object;
+}
+
+DataPool *createPool(void* (*objectConstructor(void *)), void* (*objectDestructor(void *))) {
     DBGPRINTF("createPool\n");
 
     DataPool *newPool = malloc(sizeof(DataPool));
+    pthread_mutexattr_t attr;
+    pthread_mutexattr_init(&attr);
     if(newPool) {
-        if(pthread_mutex_init(&(newPool->mutex), NULL) != 0) {
+        pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+        if(pthread_mutex_init(&(newPool->mutex), &attr) != 0) {
             DBGPRINTF("ERROR: could not initialize mutex while creating new pool\n");
             return NULL;
         }
         newPool->head = NULL;
         newPool->tail = NULL;
         newPool->listSize = 0;
+        newPool->objectConstructor = objectConstructor;
+        newPool->objectDestructor = objectDestructor;
     }
     else {
         DBGPRINTF("ERROR: could not create new pool\n");
     }
+    pthread_mutexattr_destroy(&attr);
 
     return newPool;
 }
@@ -109,7 +127,7 @@ void destroyPool(DataPool *pool) {
         destroy = object;
         object = object->next;
         pthread_mutex_destroy(&(destroy->mutex));
-        if(destroy->pObject) free(destroy->pObject);
+        if(destroy->pObject) pool->objectDestructor(destroy->pObject);
         free(destroy);
     }
 

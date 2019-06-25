@@ -200,6 +200,21 @@ int removeWorkerFromConf(Worker *worker, WorkersCnf *conf) {
     return -1;
 }
 
+void *createWorkerData(void *object) {
+    WorkerData *wd = calloc(1, sizeof(WorkerData));
+    if(wd) wd->object = object;
+    return (void *)wd;
+}
+
+void *destroyWorkerData(void *object) {
+    if(object) {
+        WorkerData *wd = (WorkerData *)object;
+        if(wd->pData) free(wd->pData);
+        free(wd);
+    }
+    return;
+}
+
 int workersInitConfig(WorkersCnf *conf) {
     DBGPRINTF("workersInitConfig\n");
 
@@ -208,7 +223,7 @@ int workersInitConfig(WorkersCnf *conf) {
     conf->pDataListHead = NULL;
     conf->pDataListTail = NULL;
     conf->listSize = 0;
-    conf->workerDataPool = createPool();
+    conf->workerDataPool = createPool(createWorkerData, destroyWorkerData);
     pthread_mutex_init(&(conf->mSignal), NULL);
     pthread_cond_init(&(conf->cSignal), NULL);
 
