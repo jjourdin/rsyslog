@@ -40,51 +40,36 @@
 
 typedef struct StreamsCnf_ {
     char *streamStoreFolder;
-    uint32_t streamNumber;
-    struct StreamBuffer_ *listHead;
+    uint32_t streamMaxBufferSize;
 
-    DataPool *sbsPool;
+    DataPool *sbPool;
 } StreamsCnf;
 
 extern StreamsCnf *streamsCnf;
-
-typedef struct StreamBufferSegment_ {
-    uint32_t length;
-    uint32_t streamOffset;
-    struct StreamBufferSegment_ *prev;
-    struct StreamBufferSegment_ *next;
-
-    DataObject *object;
-} StreamBufferSegment;
 
 typedef struct StreamBuffer_ {
     uint8_t *buffer;
     uint32_t bufferSize;
     uint32_t bufferFill;
+    uint32_t streamOffset;
 
     struct YaraRuleList_ *ruleList;
 
-    uint32_t sbsNumber;
-    StreamBufferSegment *sbsListHead;
-    StreamBufferSegment *sbsListTail;
-
     FileStruct *bufferDump;
 
-    struct StreamBuffer_ *next;
-    struct StreamBuffer_ *prev;
+    DataObject *object;
 } StreamBuffer;
 
 void yaraDeleteRuleList(struct YaraRuleList_ *);
 
+void *streamBufferCreate(void *);
+void *streamBufferDelete(void *);
 void streamInitConfig(StreamsCnf *);
 void streamDeleteConfig(StreamsCnf *);
 int linkStreamBufferToDumpFile(StreamBuffer *, char *);
 uint32_t streamBufferDumpToFile(StreamBuffer *);
-StreamBuffer *streamBufferCreate();
 int streamBufferExtend(StreamBuffer *, uint32_t);
-void streamBufferDelete(StreamBuffer *);
-int streamBufferAddDataSegment(StreamBuffer *, uint32_t, uint32_t, uint8_t *);
+int streamBufferAddDataSegment(StreamBuffer *,uint32_t, uint8_t *);
 void printStreamBufferInfo(StreamBuffer *);
-void printStreamBufferSegmentInfo(StreamBufferSegment *);
 
 #endif /* STREAM_BUFFER_H */

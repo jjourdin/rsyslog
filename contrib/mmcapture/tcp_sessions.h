@@ -39,6 +39,7 @@
 #include "stream_buffer.h"
 #include "flow.h"
 #include "file_utils.h"
+#include "data_pool.h"
 
 #define MAX_TCP_SESSIONS 512
 #define TCP_PROTO 6

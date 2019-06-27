@@ -45,7 +45,13 @@ static inline TcpConnection *tcpConnectionCreate() {
     TcpConnection *tcpConnection = calloc(1, sizeof(TcpConnection));
 
     if(tcpConnection) {
-        tcpConnection->streamBuffer = streamBufferCreate();
+        DataObject *object = getOrCreateAvailableObject(streamsCnf->sbPool);
+        if(object) {
+            tcpConnection->streamBuffer = object->pObject;
+        }
+        else {
+            DBGPRINTF("ERROR: could not get new StreamBuffer from pool\n");
+        }
 
         if(tcpConnection->streamBuffer) {
             return tcpConnection;
@@ -190,7 +196,7 @@ int tcpSessionInitFromPacket(TcpSession *tcpSession, Packet *pkt) {
 
             if(tcpDataLength) {
                 uint32_t dataLength = tcpDataLength;
-                streamBufferAddDataSegment(srcCon->streamBuffer, 0, dataLength, pkt->payload);
+                streamBufferAddDataSegment(srcCon->streamBuffer, dataLength, pkt->payload);
                 srcCon->nextSeq = srcCon->initSeq + dataLength;
             }
 
@@ -225,7 +231,7 @@ int tcpConnectionsUpdateFromQueueElem(TcpConnection *srcCon, TcpConnection *dstC
                 offset--; /* FIN packet = seq+1 but no data */
             }
 
-            streamBufferAddDataSegment(srcCon->streamBuffer, offset, dataLength, queue->data);
+            streamBufferAddDataSegment(srcCon->streamBuffer, dataLength, queue->data);
             srcCon->nextSeq += tcpDataLength;
         }
 
@@ -289,7 +295,7 @@ int tcpConnectionsUpdateFromQueueElem(TcpConnection *srcCon, TcpConnection *dstC
 }
 
 static inline void tcpConnectionInsertToQueue(TcpConnection *connection, TcpQueue *newElem) {
-    DBGPRINTF("tcpConnectionInsertToQueue");
+    DBGPRINTF("tcpConnectionInsertToQueue\n");
 
     if(connection && newElem) {
         TcpQueue *scan;
@@ -398,9 +404,10 @@ int handleTcpFromPacket(Packet *pkt) {
                     }while(tcpQueue && !ret);
                 }
 
-                if(srcCon->state >= TCP_ESTABLISHED &&
-                dstCon->state >= TCP_ESTABLISHED &&
-                (!srcCon->streamBuffer->bufferDump->pFile || !dstCon->streamBuffer->bufferDump->pFile)) {
+                if(streamsCnf->streamStoreFolder &&
+                   srcCon->state >= TCP_ESTABLISHED &&
+                   dstCon->state >= TCP_ESTABLISHED &&
+                   (!srcCon->streamBuffer->bufferDump || !dstCon->streamBuffer->bufferDump)) {
                     char fileNameClient[100], fileNameServer[100];
 
                     snprintf(fileNameClient,

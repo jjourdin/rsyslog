@@ -28,32 +28,6 @@
 
 StreamsCnf *streamsCnf;
 
-static inline void addBufferToConfList(StreamBuffer *buffer) {
-    DBGPRINTF("addBufferToConfList\n");
-
-    if(streamsCnf->listHead) {
-        buffer->next = streamsCnf->listHead;
-        streamsCnf->listHead->prev = buffer;
-        buffer->prev = NULL;
-    }
-    else {
-        buffer->next = NULL;
-        buffer->prev = NULL;
-    }
-    streamsCnf->listHead = buffer;
-    streamsCnf->streamNumber++;
-    return;
-}
-
-static inline void removeBufferFromConfList(StreamBuffer *buffer) {
-    DBGPRINTF("removeBufferFromConfList\n");
-
-    if(buffer->prev) buffer->prev->next = buffer->next;
-    if(buffer->next) buffer->next->prev = buffer->prev;
-    if(streamsCnf->listHead == buffer) streamsCnf->listHead = buffer->next;
-    streamsCnf->streamNumber--;
-}
-
 static inline int initBuffer(StreamBuffer *sb) {
     DBGPRINTF("initBuffer\n");
 
@@ -67,24 +41,45 @@ static inline int initBuffer(StreamBuffer *sb) {
     return -1;
 }
 
-void *createNewSBS(void *object) {
-    StreamBufferSegment *sbs = calloc(1, sizeof(StreamBufferSegment));
-    return (void *)sbs;
+void *streamBufferCreate(void *object) {
+    DBGPRINTF("streamBufferCreate\n");
+
+    StreamBuffer *sb = calloc(1, sizeof(StreamBuffer));
+    if(sb) {
+        if(initBuffer(sb) == 0) {
+            sb->object = object;
+            return (void *)sb;
+        }
+
+        free(sb);
+    }
+
+    return NULL;
 }
 
-void *destructSBS(void *object) {
+void *streamBufferDelete(void *object) {
+    DBGPRINTF("streamBufferDelete\n");
+
     if(object) {
-        StreamBufferSegment *sbs = (StreamBufferSegment *)object;
-        free(sbs);
+        StreamBuffer *sb = (StreamBuffer *)object;
+
+        if(sb->bufferDump) {
+            streamBufferDumpToFile(sb);
+            deleteFileStruct(sb->bufferDump);
+        }
+
+        if(sb->buffer) free(sb->buffer);
+        if(sb->ruleList) yaraDeleteRuleList(sb->ruleList);
+
+        free(sb);
     }
-    return;
 }
 
 void streamInitConfig(StreamsCnf *conf) {
     DBGPRINTF("streamInitConfig\n");
     memset(conf, 0, sizeof(StreamsCnf));
 
-    conf->sbsPool = createPool(createNewSBS, destructSBS);
+    conf->sbPool = createPool(streamBufferCreate, streamBufferDelete);
 
     streamsCnf = conf;
     return;
@@ -93,14 +88,8 @@ void streamInitConfig(StreamsCnf *conf) {
 void streamDeleteConfig(StreamsCnf *conf) {
     DBGPRINTF("streamDeleteConfig\n");
 
-    StreamBuffer *delete, *sb = streamsCnf->listHead;
-    while(sb) {
-        delete = sb;
-        sb = sb->next;
-        streamBufferDelete(delete);
-    }
     if(conf->streamStoreFolder) free(conf->streamStoreFolder);
-    destroyPool(conf->sbsPool);
+    destroyPool(conf->sbPool);
     free(conf);
 }
 
@@ -111,6 +100,8 @@ int linkStreamBufferToDumpFile(StreamBuffer *sb, char *filename) {
         DBGPRINTF("linking file '%s' to stream buffer\n", filename);
         FILE *opened = openFile(streamsCnf->streamStoreFolder, filename);
         if(!opened) return -1;
+
+        sb->bufferDump = createFileStruct();
 
         strncpy(sb->bufferDump->filename, filename, 256);
         strncpy(sb->bufferDump->directory, streamsCnf->streamStoreFolder, 2048);
@@ -124,63 +115,20 @@ uint32_t streamBufferDumpToFile(StreamBuffer *sb) {
     uint32_t writeAmount = 0;
 
     if(sb->bufferDump->pFile) {
-        StreamBufferSegment *sbs = sb->sbsListTail;
-        while(sbs) {
-            addDataToFile((char *)(sb->buffer + sbs->streamOffset), sbs->length, sbs->streamOffset, sb->bufferDump);
-            writeAmount += sbs->length;
-            sbs = sbs->next;
-        }
+        addDataToFile((char *)(sb->buffer), sb->bufferFill, sb->streamOffset, sb->bufferDump);
+        writeAmount += sb->bufferFill;
     }
 
     return writeAmount;
 }
 
-StreamBuffer *streamBufferCreate() {
-    DBGPRINTF("streamBufferCreate\n");
-
-    StreamBuffer *sb = calloc(1, sizeof(StreamBuffer));
-    if(sb) {
-        sb->bufferDump = createFileStruct();
-        if(initBuffer(sb) == 0 && sb->bufferDump) {
-            addBufferToConfList(sb);
-            return sb;
-        }
-
-        free(sb);
-    }
-
-    return NULL;
-}
-
-void streamBufferDelete(StreamBuffer *sb) {
-    DBGPRINTF("streamBufferDelete\n");
-
-    if(sb) {
-        removeBufferFromConfList(sb);
-
-        streamBufferDumpToFile(sb);
-        deleteFileStruct(sb->bufferDump);
-
-        if(sb->buffer) free(sb->buffer);
-        if(sb->ruleList) yaraDeleteRuleList(sb->ruleList);
-
-        free(sb);
-    }
-}
-
 int streamBufferExtend(StreamBuffer *sb, uint32_t extLength) {
-    DBGPRINTF("streamBufferExtend\n");
+    DBGPRINTF("streamBufferExtend: extLength=%u\n", extLength);
 
     if(sb) {
-        uint8_t i = 0;
-        uint32_t trueExtLength = 0;
-        do {
-            trueExtLength = ++i*BUFF_ADD_BLOCK_SIZE;
-        }while((trueExtLength) < extLength);
-
-        sb->buffer = realloc(sb->buffer, sb->bufferSize + trueExtLength);
+        sb->buffer = realloc(sb->buffer, sb->bufferSize + extLength);
         if(sb->buffer) {
-            sb->bufferSize += trueExtLength;
+            sb->bufferSize += extLength;
             return 0;
         }
         else {
@@ -194,33 +142,55 @@ int streamBufferExtend(StreamBuffer *sb, uint32_t extLength) {
     return -1;
 }
 
-int streamBufferAddDataSegment(StreamBuffer *sb, uint32_t offset, uint32_t dataLength, uint8_t *data) {
-    DBGPRINTF("streamBufferAddDataSegment offset: %u, dataLength: %u\n", offset, dataLength);
+static inline void streamBufferShift(StreamBuffer *sb, int amount) {
+    DBGPRINTF("streamBufferShift, amount=%u\n", amount);
 
     if(sb) {
-        uint32_t bufferSize = sb->bufferSize;
+        if(amount > sb->bufferSize) amount = sb->bufferSize;
+        if(sb->bufferDump) addDataToFile(sb->buffer, amount, sb->streamOffset, sb->bufferDump);
+        memmove(sb->buffer, sb->buffer + amount, sb->bufferFill - amount);
+        sb->bufferFill -= amount;
+        sb->streamOffset += amount;
+    }
+    else {
+        DBGPRINTF("streamBufferShift: ERROR trying to shift StreamBuffer, but object is NULL\n");
+    }
+    return;
+}
 
-        // extend buffer if not big enough
-        if(offset+dataLength > bufferSize) {
-            streamBufferExtend(sb, (offset+dataLength)-bufferSize);
+/**
+ * The data given at this point SHOULD BE the next immediate data for the stream
+ * @param sb
+ * @param dataLength
+ * @param data
+ * @return
+ */
+int streamBufferAddDataSegment(StreamBuffer *sb, uint32_t dataLength, uint8_t *data) {
+    DBGPRINTF("streamBufferAddDataSegment, dataLength: %u\n", dataLength);
+
+    if(sb) {
+        if(dataLength > streamsCnf->streamMaxBufferSize) {
+            DBGPRINTF("dataLength is too high (%u)for buffer and its max size, "
+                      "capping at %u\n", dataLength, streamsCnf->streamMaxBufferSize);
+            dataLength = streamsCnf->streamMaxBufferSize;
         }
-
-        // add data to buffer
-        memmove(sb->buffer + offset, data, dataLength);
-        sb->bufferFill = (offset+dataLength > sb->bufferFill) ? offset+dataLength : sb->bufferFill;
-
-        DataObject *sbsObj = getOrCreateAvailableObject(streamsCnf->sbsPool);
-        if(!sbsObj) return -1;
-        StreamBufferSegment *sbs = sbsObj->pObject;
-        sbs->streamOffset = offset;
-        sbs->length = dataLength;
-
-        sbs->prev = sb->sbsListHead;
-        if(sb->sbsListHead) sb->sbsListHead->next = sbs;
-        sb->sbsListHead = sbs;
-        if(!sb->sbsListTail) sb->sbsListTail = sbs;
-        sbs->next = NULL;
-        sb->sbsNumber++;
+        // extend buffer if not big enough
+        if(sb->bufferFill + dataLength > sb->bufferSize) {
+            uint32_t addition = sb->bufferFill + dataLength - sb->bufferSize;
+            if(sb->bufferSize + addition <= streamsCnf->streamMaxBufferSize) {
+                streamBufferExtend(sb, addition);
+            }
+            else if(sb->bufferSize < streamsCnf->streamMaxBufferSize) {
+                uint32_t extension = streamsCnf->streamMaxBufferSize - sb->bufferSize;
+                streamBufferExtend(sb, extension);
+                streamBufferShift(sb, addition - extension);
+            }
+            else {
+                streamBufferShift(sb, addition);
+            }
+        }
+        memcpy(sb->buffer + sb->bufferFill, data, dataLength);
+        sb->bufferFill += dataLength;
 
         return 0;
     }
@@ -233,25 +203,8 @@ void printStreamBufferInfo(StreamBuffer *sb) {
 
     DBGPRINTF("sb->bufferSize: %u\n", sb->bufferSize);
     DBGPRINTF("sb->bufferFill: %u\n", sb->bufferFill);
-    DBGPRINTF("sb->sbsNumber: %u\n", sb->sbsNumber);
-    if(sb->sbsListTail) {
-        printStreamBufferSegmentInfo(sb->sbsListTail);
-    }
+    DBGPRINTF("sb->streamOffset: %u\n", sb->streamOffset);
 
     DBGPRINTF("\n\n########## END SB INFO ##########\n");
-    return;
-}
-
-void printStreamBufferSegmentInfo(StreamBufferSegment *sbs) {
-    DBGPRINTF("\n\n########## SBS INFO ##########\n");
-
-    DBGPRINTF("sbs->length: %u\n", sbs->length);
-    DBGPRINTF("sbs->offset: %u\n", sbs->streamOffset);
-
-    if(sbs->next) {
-        printStreamBufferSegmentInfo(sbs->next);
-    }
-
-    DBGPRINTF("\n\n########## END SBS INFO ##########\n");
     return;
 }

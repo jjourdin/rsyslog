@@ -348,10 +348,10 @@ CODE_STD_STRING_REQUESTnewActInst(1)
         }
         else if(!strcmp(actpblk.descr[i].name, "yaraScanMaxSize")) {
             pData->globalYaraCnf->scanMaxSize = (uint32_t) pvals[i].val.d.n;
+            pData->globalStreamsCnf->streamMaxBufferSize = pData->globalYaraCnf->scanMaxSize;
             DBGPRINTF("yaraScanMaxSize set to %u\n", pData->globalYaraCnf->scanMaxSize);
         }
         else if(!strcmp(actpblk.descr[i].name, "streamStoreFolder")) {
-            free(pData->globalStreamsCnf->streamStoreFolder); /* freeing old allocated memory */
             pData->globalStreamsCnf->streamStoreFolder = es_str2cstr(pvals[i].val.d.estr, NULL);
 
             DBGPRINTF("streamStoreFolder set to '%s'\n", pData->globalStreamsCnf->streamStoreFolder);
@@ -382,10 +382,13 @@ CODE_STD_STRING_REQUESTnewActInst(1)
         }
     }
 
-    if(createFolder(pData->globalStreamsCnf->streamStoreFolder) != 0){
-        LogError(0, RS_RET_CONFIG_ERROR, "error while creating folder '%s' for stream dumps,"
-                                         " streams won't be dumped", pData->globalStreamsCnf->streamStoreFolder);
-        free(pData->globalStreamsCnf->streamStoreFolder);
+    if(pData->globalStreamsCnf->streamStoreFolder) {
+        if(createFolder(pData->globalStreamsCnf->streamStoreFolder) != 0){
+            LogError(0, RS_RET_CONFIG_ERROR, "error while creating folder '%s' for stream dumps,"
+            " streams won't be dumped", pData->globalStreamsCnf->streamStoreFolder);
+            free(pData->globalStreamsCnf->streamStoreFolder);
+            pData->globalStreamsCnf->streamStoreFolder = NULL;
+        }
     }
 
 
@@ -414,11 +417,9 @@ CODESTARTdoAction
         }
     }
 
-    DBGPRINTF("getting WorkerDataContext object\n");
     DataObject *wdcObject = getOrCreateAvailableObject(pData->workerDataContextPool);
     WorkerDataContext *context;
     if(wdcObject) {
-        DBGPRINTF("ok\n");
         context = wdcObject->pObject;
     }
     else {
@@ -428,11 +429,9 @@ CODESTARTdoAction
     context->pMsg = MsgDup(pMsg);
     context->instanceData = pData;
 
-    DBGPRINTF("getting WorkerData object\n");
     DataObject *wdObject = getOrCreateAvailableObject(pData->workersCnf->workerDataPool);
     WorkerData *work;
     if(wdObject) {
-        DBGPRINTF("ok\n");
         work = wdObject->pObject;
     }
     else {
