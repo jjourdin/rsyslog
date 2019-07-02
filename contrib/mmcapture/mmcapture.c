@@ -209,6 +209,7 @@ void *workerDoWork(void *pData) {
                 fjson_object_object_add(jsonLine, "yara_match", yaraMeta);
 
                 appendLineToFile(fjson_object_to_json_string(jsonLine), context->instanceData->logFile);
+                fjson_object_put(jsonLine);
             }
             else {
                 DBGPRINTF("could not write yara rule match to file: no file defined\n");
