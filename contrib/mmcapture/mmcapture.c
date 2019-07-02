@@ -124,9 +124,19 @@ void *createWorkerDataContext(void *object) {
     return (void *)context;
 }
 
-void *destroyWorkerDataContext(void *object) {
+void destroyWorkerDataContext(void *wdc) {
     DBGPRINTF("destroyWorkerDataContext\n");
-    if(object) free(object);
+    if(wdc) free(wdc);
+    return;
+}
+
+void resetWorkerDataContext(void *wdcObject) {
+    DBGPRINTF("resetWorkerDataContext\n");
+
+    if(wdcObject) {
+        WorkerDataContext *wdc = (WorkerDataContext *)wdcObject;
+        if(wdc->pMsg) msgDestruct(&(wdc->pMsg));
+    }
     return;
 }
 
@@ -134,10 +144,9 @@ void *workerDoWork(void *pData) {
     WorkerDataContext *context = (WorkerDataContext *)pData;
     int ret;
 
-    DBGPRINTF("getting impcap data\n")
     Packet *pkt = getImpcapData(context->pMsg);
-    DBGPRINTF("destructing message\n")
     msgDestruct(&(context->pMsg));
+    context->pMsg = NULL;
 
     pkt->enterTime = datetime.GetTime(NULL);
 
@@ -255,7 +264,8 @@ CODESTARTcreateInstance
     pData->globalYaraCnf = calloc(1, sizeof(YaraCnf));
     pData->workersCnf = calloc(1, sizeof(WorkersCnf));
     pData->logFile = createFileStruct();
-    pData->workerDataContextPool = createPool(createWorkerDataContext, destroyWorkerDataContext);
+    pData->workerDataContextPool = createPool(createWorkerDataContext, destroyWorkerDataContext, resetWorkerDataContext);
+    initTCPPools();
 ENDcreateInstance
 
 BEGINcreateWrkrInstance
@@ -272,6 +282,7 @@ CODESTARTfreeInstance
     workersDeleteConfig(pData->workersCnf);
     deleteFileStruct(pData->logFile);
     destroyPool(pData->workerDataContextPool);
+    destroyTCPPools();
 ENDfreeInstance
 
 BEGINfreeWrkrInstance
@@ -426,7 +437,7 @@ CODESTARTdoAction
         DBGPRINTF("ERROR: WorkerDataContext NULL\n");
     }
 
-    context->pMsg = MsgDup(pMsg);
+    context->pMsg = MsgAddRef(pMsg);
     context->instanceData = pData;
 
     DataObject *wdObject = getOrCreateAvailableObject(pData->workersCnf->workerDataPool);
