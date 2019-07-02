@@ -28,8 +28,9 @@
 static inline DataObject *createDataObject() {
     DBGPRINTF("createDataObject\n");
 
-    DataObject *newDataObject = calloc(1, sizeof(DataObject));
+    DataObject *newDataObject = malloc(sizeof(DataObject));
     if(newDataObject) {
+        newDataObject->pObject = NULL;
         newDataObject->state = INIT;
         pthread_mutex_init(&(newDataObject->mutex), NULL);
         return newDataObject;
@@ -83,6 +84,9 @@ DataObject *getOrCreateAvailableObject(DataPool *pool) {
             addObjectToPool(pool, object);
         }
     }
+    else {
+        pool->objectResetor(object->pObject);
+    }
 
     object->state = USED;
 
@@ -91,7 +95,7 @@ DataObject *getOrCreateAvailableObject(DataPool *pool) {
     return object;
 }
 
-DataPool *createPool(void* (*objectConstructor(void *)), void* (*objectDestructor(void *))) {
+DataPool *createPool(void* (*objectConstructor(void *)), void (*objectDestructor(void *)), void (*objectResetor(void *))) {
     DBGPRINTF("createPool\n");
 
     DataPool *newPool = malloc(sizeof(DataPool));
@@ -108,6 +112,7 @@ DataPool *createPool(void* (*objectConstructor(void *)), void* (*objectDestructo
         newPool->listSize = 0;
         newPool->objectConstructor = objectConstructor;
         newPool->objectDestructor = objectDestructor;
+        newPool->objectResetor = objectResetor;
     }
     else {
         DBGPRINTF("ERROR: could not create new pool\n");

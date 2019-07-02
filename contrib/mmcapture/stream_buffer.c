@@ -41,13 +41,13 @@ static inline int initBuffer(StreamBuffer *sb) {
     return -1;
 }
 
-void *streamBufferCreate(void *object) {
+static inline void *streamBufferCreate(void *dObject) {
     DBGPRINTF("streamBufferCreate\n");
 
     StreamBuffer *sb = calloc(1, sizeof(StreamBuffer));
     if(sb) {
         if(initBuffer(sb) == 0) {
-            sb->object = object;
+            sb->object = dObject;
             return (void *)sb;
         }
 
@@ -57,11 +57,11 @@ void *streamBufferCreate(void *object) {
     return NULL;
 }
 
-void *streamBufferDelete(void *object) {
+static inline void streamBufferDelete(void *sbObject) {
     DBGPRINTF("streamBufferDelete\n");
 
-    if(object) {
-        StreamBuffer *sb = (StreamBuffer *)object;
+    if(sbObject) {
+        StreamBuffer *sb = (StreamBuffer *)sbObject;
 
         if(sb->bufferDump) {
             streamBufferDumpToFile(sb);
@@ -75,11 +75,25 @@ void *streamBufferDelete(void *object) {
     }
 }
 
+void streamBufferReset(void *sbObject) {
+    DBGPRINTF("streamBufferReset\n");
+
+    if(sbObject) {
+        StreamBuffer *sb = (StreamBuffer *)sbObject;
+        sb->bufferSize = 0;
+        sb->bufferFill = 0;
+        sb->streamOffset = 0;
+        if(sb->ruleList) yaraDeleteRuleList(sb->ruleList);
+        if(sb->bufferDump) deleteFileStruct(sb->bufferDump);
+    }
+    return;
+}
+
 void streamInitConfig(StreamsCnf *conf) {
     DBGPRINTF("streamInitConfig\n");
     memset(conf, 0, sizeof(StreamsCnf));
 
-    conf->sbPool = createPool(streamBufferCreate, streamBufferDelete);
+    conf->sbPool = createPool(streamBufferCreate, streamBufferDelete, streamBufferReset);
 
     streamsCnf = conf;
     return;

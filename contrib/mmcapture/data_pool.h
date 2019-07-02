@@ -56,13 +56,14 @@ typedef struct DataPool_ {
     uint32_t listSize;
 
     void* (*objectConstructor)(void *);
-    void* (*objectDestructor)(void *);
+    void (*objectDestructor)(void *);
+    void (*objectResetor)(void *);
 
     pthread_mutex_t mutex;
 } DataPool;
 
 DataObject *getOrCreateAvailableObject(DataPool *);
-DataPool *createPool(void* (*objectConstructor(void *)), void* (*objectDestructor(void *)));
+DataPool *createPool(void* (*objectConstructor(void *)), void (*objectDestructor(void *)), void (*objectResetor(void *)));
 void destroyPool(DataPool *);
 
 #endif /* DATA_POOL_H */

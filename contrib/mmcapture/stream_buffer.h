@@ -62,8 +62,7 @@ typedef struct StreamBuffer_ {
 
 void yaraDeleteRuleList(struct YaraRuleList_ *);
 
-void *streamBufferCreate(void *);
-void *streamBufferDelete(void *);
+void streamBufferReset(void *);
 void streamInitConfig(StreamsCnf *);
 void streamDeleteConfig(StreamsCnf *);
 int linkStreamBufferToDumpFile(StreamBuffer *, char *);
