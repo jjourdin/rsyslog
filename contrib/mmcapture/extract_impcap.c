@@ -76,6 +76,9 @@ Packet *getImpcapData(smsg_t *pMsg) {
 
         updatePacketFromHeaders(pkt);
 
+        msgPropDescrDestruct(pDesc);
+        fjson_object_put(pJson);
+
         /* search impcap packet data */
         msgPropDescrFill(pDesc, (uchar*)IMPCAP_DATA, strlen(IMPCAP_DATA));
         localret = msgGetJSONPropJSON(pMsg, pDesc, &pJson);
@@ -94,6 +97,8 @@ Packet *getImpcapData(smsg_t *pMsg) {
     }
 
     msgPropDescrDestruct(pDesc);
+    free(pDesc);
+    fjson_object_put(pJson);
 
     return pkt;
 }
