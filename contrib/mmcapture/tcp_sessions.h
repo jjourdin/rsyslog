@@ -46,6 +46,10 @@
 
 #define HAS_TCP_FLAG(flags, flag) ((strchr(flags, flag) == NULL) ? 0 : 1)
 
+extern DataPool *queuePool;
+extern DataPool *connPool;
+extern DataPool *sessPool;
+
 typedef struct TcpQueue_ {
     char tcp_flags[10];
     uint32_t seq;
@@ -55,6 +59,8 @@ typedef struct TcpQueue_ {
     uint8_t used;
     struct TcpQueue_ *prev;
     struct TcpQueue_ *next;
+
+    DataObject *object;
 } TcpQueue;
 
 enum tcpState
@@ -82,16 +88,21 @@ typedef struct TcpConnection_{
     StreamBuffer *streamBuffer;
     TcpQueue *queueHead;
     TcpQueue *queueTail;
+
+    DataObject *object;
 } TcpConnection;
 
 typedef struct TcpSession_{
     TcpConnection *cCon;
     TcpConnection *sCon;
     Flow *flow;
+
+    DataObject *object;
 } TcpSession;
 
+int initTCPPools();
+void destroyTCPPools();
 int tcpSessionInitFromPacket(TcpSession *, Packet *);
-void tcpSessionDelete(TcpSession *);
 int tcpConnectionsUpdateFromQueueElem(TcpConnection *, TcpConnection *, TcpQueue *);
 int handleTcpFromPacket(Packet *);
 void printTcpQueueInfo(TcpQueue *);

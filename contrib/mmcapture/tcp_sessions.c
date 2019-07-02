@@ -28,86 +28,195 @@
 
 #include "tcp_sessions.h"
 
-static inline void tcpQueueListDelete(TcpQueue *head) {
-    DBGPRINTF("tcpQueueListDelete\n");
+DataPool *queuePool;
+DataPool *connPool;
+DataPool *sessPool;
 
-    if(head) {
-        if(head->prev) tcpQueueListDelete(head->prev);
+static inline void *tcpQueueCreate(void *dataObject) {
+    DBGPRINTF("tcpQueueCreate\n");
 
-        if(head->data) free(head->data);
-        free(head);
+    TcpQueue *queue = calloc(1, sizeof(TcpQueue));
+    if(queue) {
+        queue->object = dataObject;
+        return (void *)queue;
     }
+    DBGPRINTF("ERROR: could not create new TcpQueue\n");
+    return NULL;
 }
 
-static inline TcpConnection *tcpConnectionCreate() {
+static inline void tcpQueueDelete(void *queueObject) {
+    DBGPRINTF("tcpQueueDelete\n");
+
+    if(queueObject) {
+        TcpQueue *queue = (TcpQueue *)queueObject;
+        if(queue->data) free(queue->data);
+    }
+    return;
+}
+
+static inline void tcpQueueReset(void *queueObject) {
+    DBGPRINTF("tcpQueueReset\n");
+
+    if(queueObject) {
+        TcpQueue *queue = (TcpQueue *)queueObject;
+        queue->tcp_flags[0] = '\0';
+        queue->seq = 0;
+        queue->ack = 0;
+        queue->dataLength = 0;
+        queue->used = 0;
+        queue->prev = NULL;
+        queue->next = NULL;
+        if(queue->data) {
+            free(queue->data);
+            queue->data = NULL;
+        }
+    }
+    return;
+}
+
+static inline void *tcpConnectionCreate(void *dataObject) {
     DBGPRINTF("tcpConnectionCreate\n");
 
-    TcpConnection *tcpConnection = calloc(1, sizeof(TcpConnection));
-
-    if(tcpConnection) {
-        DataObject *object = getOrCreateAvailableObject(streamsCnf->sbPool);
-        if(object) {
-            tcpConnection->streamBuffer = object->pObject;
+    TcpConnection *conn = calloc(1, sizeof(TcpConnection));
+    if(conn) {
+        conn->object = dataObject;
+        DataObject *sbObject = getOrCreateAvailableObject(streamsCnf->sbPool);
+        if(sbObject) {
+            conn->streamBuffer = sbObject->pObject;
         }
         else {
             DBGPRINTF("ERROR: could not get new StreamBuffer from pool\n");
         }
 
-        if(tcpConnection->streamBuffer) {
-            return tcpConnection;
+        if(conn->streamBuffer) {
+            return conn;
         }
 
-        DBGPRINTF("could not create new streamBuffer\n");
-        free(tcpConnection);
+        free(conn);
     }
 
-    DBGPRINTF("could not create new TcpConnection\n");
+    DBGPRINTF("ERROR: could not create new TcpConnection\n");
     return NULL;
 }
 
-static inline void tcpConnectionDelete(TcpConnection *tcpConnection) {
+static inline void tcpConnectionDelete(void *connObject) {
     DBGPRINTF("tcpConnectionDelete\n");
 
-    if(tcpConnection) {
-        streamBufferDelete(tcpConnection->streamBuffer);
-        tcpQueueListDelete(tcpConnection->queueHead);
-        free(tcpConnection);
+    if(connObject) {
+        TcpConnection *conn = (TcpConnection *)connObject;
+        free(conn);
     }
 
     return;
 }
 
-static inline TcpSession *tcpSessionCreate() {
+static inline void tcpConnectionReset(void *connObject) {
+    DBGPRINTF("tcpConnectionReset\n");
+
+    if(connObject) {
+        TcpConnection *conn = (TcpConnection *)connObject;
+        conn->sPort = 0;
+        conn->state = TCP_NONE;
+        conn->initSeq = 0;
+        conn->nextSeq = 0;
+        conn->lastAck = 0;
+
+        pthread_mutex_lock(&(conn->streamBuffer->object->mutex));
+        conn->streamBuffer->object->state = AVAILABLE;
+        pthread_mutex_lock(&(conn->streamBuffer->object->mutex));
+
+        conn->streamBuffer = NULL;
+        TcpQueue *queue = conn->queueTail;
+
+        for(; queue != NULL; queue = queue->next) {
+            pthread_mutex_lock(&(queue->object->mutex));
+            queue->object->state = AVAILABLE;
+            pthread_mutex_unlock(&(queue->object->mutex));
+        }
+
+        conn->queueHead = NULL;
+        conn->queueTail = NULL;
+    }
+    return;
+}
+
+static inline void *tcpSessionCreate(void *dataObject) {
     DBGPRINTF("tcpSessionCreate\n");
 
     TcpSession *tcpSession = calloc(1, sizeof(TcpSession));
 
     if(tcpSession) {
-        tcpSession->cCon = tcpConnectionCreate();
-        tcpSession->sCon = tcpConnectionCreate();
-
-        if(tcpSession->cCon && tcpSession->sCon) {
-            return tcpSession;
+        DataObject *srcConnObject = getOrCreateAvailableObject(connPool);
+        DataObject *dstConnObject = getOrCreateAvailableObject(connPool);
+        if(!srcConnObject || !dstConnObject) {
+            DBGPRINTF("ERROR: could not get new TcpConnection objects for new TcpSession\n");
+            free(tcpSession);
+            if(srcConnObject) {
+                pthread_mutex_lock(&(srcConnObject->mutex));
+                srcConnObject->state = AVAILABLE;
+                pthread_mutex_unlock(&(srcConnObject->mutex));
+            }
+            if(dstConnObject) {
+                pthread_mutex_lock(&(dstConnObject->mutex));
+                dstConnObject->state = AVAILABLE;
+                pthread_mutex_unlock(&(dstConnObject->mutex));
+            }
+            return NULL;
         }
-
-        tcpConnectionDelete(tcpSession->cCon);
-        tcpConnectionDelete(tcpSession->sCon);
-        free(tcpSession);
+        tcpSession->cCon = srcConnObject->pObject;
+        tcpSession->sCon = dstConnObject->pObject;
+        return tcpSession;
     }
 
     DBGPRINTF("could not create new TcpSession\n");
     return NULL;
 }
 
-void tcpSessionDelete(TcpSession *tcpSession) {
+static inline void tcpSessionDelete(void *sessionObject) {
     DBGPRINTF("tcpSessionDelete\n");
 
-    if(tcpSession) {
-        tcpConnectionDelete(tcpSession->cCon);
-        tcpConnectionDelete(tcpSession->sCon);
-        free(tcpSession);
+    if(sessionObject) {
+        TcpSession *session = (TcpSession *)sessionObject;
+        free(session);
     }
 
+    return;
+}
+
+static inline void tcpSessionReset(void *sessionObject) {
+    DBGPRINTF("tcpSessionReset\n");
+
+    if(sessionObject) {
+        TcpSession *session = (TcpSession *)sessionObject;
+        pthread_mutex_lock(&(session->sCon->object->mutex));
+        pthread_mutex_lock(&(session->cCon->object->mutex));
+        session->sCon->object->state = AVAILABLE;
+        session->cCon->object->state = AVAILABLE;
+        pthread_mutex_unlock(&(session->sCon->object->mutex));
+        pthread_mutex_unlock(&(session->cCon->object->mutex));
+
+        session->sCon = NULL;
+        session->cCon = NULL;
+        session->flow = NULL;
+    }
+    return;
+}
+
+int initTCPPools() {
+    DBGPRINTF("initTCPPools\n");
+
+    queuePool = createPool(tcpQueueCreate, tcpQueueDelete, tcpQueueReset);
+    connPool = createPool(tcpConnectionCreate, tcpConnectionDelete, tcpConnectionReset);
+    sessPool = createPool(tcpSessionCreate, tcpSessionDelete, tcpSessionReset);
+    return !queuePool || !connPool || !sessPool;
+}
+
+void destroyTCPPools() {
+    DBGPRINTF("destroyTCPPools\n");
+
+    destroyPool(queuePool);
+    destroyPool(connPool);
+    destroyPool(sessPool);
     return;
 }
 
@@ -122,7 +231,9 @@ static inline void swapTcpConnections(TcpSession *tcpSession) {
 static inline TcpQueue *packetEnqueue(Packet *pkt) {
     DBGPRINTF("packetEnqueue\n");
 
-    TcpQueue *queue = calloc(1, sizeof(TcpQueue));
+    DataObject *queueObject = getOrCreateAvailableObject(queuePool);
+    TcpQueue *queue;
+    if(queueObject) queue = queueObject->pObject;
 
     if(queue) {
         strncpy(queue->tcp_flags, pkt->tcph->flags, 10);
@@ -131,7 +242,7 @@ static inline TcpQueue *packetEnqueue(Packet *pkt) {
         queue->dataLength = pkt->tcph->TCPDataLength;
         if(queue->dataLength) {
             queue->data = calloc(1, queue->dataLength);
-            memmove(queue->data, pkt->payload, queue->dataLength);
+            memcpy(queue->data, pkt->payload, queue->dataLength);
         }
     }
     else {
@@ -347,9 +458,6 @@ static inline int tcpQueueRemoveFromConnection(TcpConnection *connection, TcpQue
 
         if(connection->queueHead == queue) connection->queueHead = queue->prev;
         if(connection->queueTail == queue) connection->queueTail = queue->next;
-
-        if(queue->data) free(queue->data);
-        free(queue);
         return 0;
     }
     return 1;
@@ -381,7 +489,13 @@ int handleTcpFromPacket(Packet *pkt) {
             TcpSession *session = (TcpSession *)pkt->flow->protoCtx;
 
             if(!session) {
-                session = tcpSessionCreate();
+                DataObject *sessionObject = getOrCreateAvailableObject(sessPool);
+                if(!sessionObject) {
+                    DBGPRINTF("ERROR: could not get new TcpSession\n");
+                    return -1;
+                }
+                session = sessionObject->pObject;
+
                 tcpSessionInitFromPacket(session, pkt);
                 TcpQueue *tcpQueue = packetEnqueue(pkt);
                 tcpConnectionInsertToQueue(session->cCon, tcpQueue);
@@ -400,8 +514,16 @@ int handleTcpFromPacket(Packet *pkt) {
                 if(tcpQueue) {
                     do {
                         ret = tcpConnectionsUpdateFromQueueElem(srcCon, dstCon, tcpQueue);
+                        tcpQueueRemoveFromConnection(srcCon, tcpQueue);
+
+                        pthread_mutex_lock(&(tcpQueue->object->mutex));
+                        tcpQueue->object->state = AVAILABLE;
+                        pthread_mutex_unlock(&(tcpQueue->object->mutex));
+
+                        if(ret) return 1;
+
                         tcpQueue = tcpConnectionGetNextInQueue(srcCon);
-                    }while(tcpQueue && !ret);
+                    }while(tcpQueue);
                 }
 
                 if(streamsCnf->streamStoreFolder &&
@@ -428,8 +550,6 @@ int handleTcpFromPacket(Packet *pkt) {
                         DBGPRINTF("could not link file to stream\n");
                     }
                 }
-
-                if(ret == 1) return 1;
             }
             //printTcpSessionInfo(session);
 
