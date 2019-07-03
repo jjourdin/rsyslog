@@ -47,7 +47,6 @@ Packet *getImpcapData(smsg_t *pMsg) {
 
         if(fjson_object_object_get_ex(pJson, "ID", &obj)) {
             pkt->pktNumber = fjson_object_get_int(obj);
-            DBGPRINTF("packet number: %d\n", pkt->pktNumber);
         }
 
         if (fjson_object_object_get_ex(pJson, "ETH_type", &obj)) {
@@ -156,7 +155,7 @@ TCPHdr *getTcpHeader(struct json_object *pJson) {
     }
 
     if (fjson_object_object_get_ex(pJson, "net_flags", &obj)) {
-        tcph->flags = fjson_object_get_string(obj);
+        strncpy(tcph->flags, fjson_object_get_string(obj), 10);
         DBGPRINTF("tcph->flags: %s\n", tcph->flags);
     }
 
@@ -180,12 +179,12 @@ IPV6Hdr *getIpv6Header(struct json_object *pJson) {
     }
 
     if (fjson_object_object_get_ex(pJson, "net_dst_ip", &obj)) {
-        ipv6h->dst = fjson_object_get_string(obj);
+        strncpy(ipv6h->dst, fjson_object_get_string(obj), 32);
         DBGPRINTF("ip6h->dst: %s\n", ipv6h->dst);
     }
 
     if (fjson_object_object_get_ex(pJson, "net_src_ip", &obj)) {
-        ipv6h->src = fjson_object_get_string(obj);
+        strncpy(ipv6h->src, fjson_object_get_string(obj), 32);
         DBGPRINTF("ip6h->src: %s\n", ipv6h->src);
 
     }
@@ -210,12 +209,12 @@ IPV4Hdr *getIpv4Header(struct json_object *pJson) {
     memset(ipv4h, 0, sizeof(IPV4Hdr));
 
     if (fjson_object_object_get_ex(pJson, "net_dst_ip", &obj)) {
-        ipv4h->dst = fjson_object_get_string(obj);
+        strncpy(ipv4h->dst, fjson_object_get_string(obj), 20);
         DBGPRINTF("ip4h->dst: %s\n", ipv4h->dst);
     }
 
     if (fjson_object_object_get_ex(pJson, "net_src_ip", &obj)) {
-        ipv4h->src = fjson_object_get_string(obj);
+        strncpy(ipv4h->src, fjson_object_get_string(obj), 20);
         DBGPRINTF("ip4h->src: %s\n", ipv4h->src);
     }
 
@@ -256,7 +255,7 @@ SMBHdr *getSmbHeader(struct json_object *pJson) {
     }
 
     if (fjson_object_object_get_ex(pJson, "SMB_flags", &obj)) {
-        smbh->flags = fjson_object_get_string(obj);
+        strncpy(smbh->flags, fjson_object_get_string(obj), 10);
     }
 
     if (fjson_object_object_get_ex(pJson, "SMB_seqNumber", &obj)) {

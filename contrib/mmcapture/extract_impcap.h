@@ -51,23 +51,23 @@ typedef struct TCPHdr_ {
     uint32_t seq;
     uint32_t ack;
     uint32_t TCPDataLength;
-    char *flags;
+    char flags[10];
 } TCPHdr;
 
 #define ETHERTYPE_IPV4  0x0800
 #define ETHERTYPE_IPV6  0X86DD
 
 typedef struct IPV4Hdr_ {
-    char *src;
-    char *dst;
+    char src[20];
+    char dst[20];
     uint8_t hLen;
     uint8_t ttl;
     uint8_t proto;
 } IPV4Hdr;
 
 typedef struct IPV6Hdr_ {
-    char *src;
-    char *dst;
+    char src[32];
+    char dst[32];
     uint8_t ttl;
     uint8_t proto;
 } IPV6Hdr;
@@ -76,7 +76,7 @@ typedef struct SMBHdr_ {
     uint32_t version;
     uint32_t ntStatus;
     uint16_t opcode;
-    char *flags;
+    char flags[10];
     uint64_t seqNumber;
     uint32_t procID;
     uint32_t treeID;

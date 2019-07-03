@@ -55,7 +55,6 @@ static inline Flow *createNewFlow() {
 void deleteFlow(Flow *flow) {
     if(flow) {
         pthread_mutex_destroy(&(flow->mFlow));
-        if(flow->protoCtx) free(flow->protoCtx);
         free(flow);
     }
 

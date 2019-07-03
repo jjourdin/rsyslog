@@ -213,7 +213,6 @@ static inline void destroyWorkerData(void *wdObject) {
 
     if(wdObject) {
         WorkerData *wd = (WorkerData *)wdObject;
-        if(wd->pData) free(wd->pData);
         free(wd);
     }
     return;
@@ -248,9 +247,11 @@ int workersInitConfig(WorkersCnf *conf) {
 void workersDeleteConfig(WorkersCnf *conf) {
     DBGPRINTF("workersDeleteConfig\n");
 
-    Worker *worker;
-    for(worker = conf->workersListHead; worker != NULL; worker = worker->next) {
-        removeWorkerFromConf(worker, conf);
+    Worker *delete, *worker = conf->workersListHead;
+    while(worker) {
+        delete = worker;
+        worker = worker->next;
+        removeWorkerFromConf(delete, conf);
     }
 
     DBGPRINTF("thread joined, destroying/freeing the rest\n");
