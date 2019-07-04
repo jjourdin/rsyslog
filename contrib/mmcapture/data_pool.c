@@ -27,15 +27,23 @@
 
 PoolStorage *poolStorage;
 
-static inline DataObject *createDataObject() {
+static inline DataObject *createDataObject(DataPool *pool) {
     DBGPRINTF("createDataObject\n");
 
     DataObject *newDataObject = malloc(sizeof(DataObject));
     if(newDataObject) {
+        pthread_mutexattr_t attr;
+        pthread_mutexattr_init(&attr);
+        pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+
         newDataObject->pObject = NULL;
         newDataObject->state = INIT;
         newDataObject->stale = 1;
-        pthread_mutex_init(&(newDataObject->mutex), NULL);
+        pthread_mutex_init(&(newDataObject->mutex), &attr);
+        newDataObject->pool = pool;
+        newDataObject->size = sizeof(DataObject);
+
+        pthread_mutexattr_destroy(&attr);
         return newDataObject;
     }
 
@@ -71,8 +79,10 @@ static inline void addPoolToStorage(DataPool *pool) {
     }
     poolStorage->head = pool;
     pool->next = NULL;
-    poolStorage->size++;
+    poolStorage->listSize++;
     if(!poolStorage->tail) poolStorage->tail = pool;
+
+    pool->poolStorage = poolStorage;
 
     return;
 }
@@ -81,17 +91,43 @@ void deleteDataObjectFromPool(DataObject *object, DataPool *pool) {
     DBGPRINTF("deleteDataObjectFromPool\n");
 
     if(pool && object && object->state != USED) {
+
         pthread_mutex_lock(&(pool->mutex));
+
         if(object->next) object->next->prev = object->prev;
         if(object->prev) object->prev->next = object->next;
         if(pool->head == object) pool->head = object->prev;
         if(pool->tail == object) pool->tail = object->next;
         pool->listSize--;
+        pool->totalAllocSize -= object->size;
+
+        pthread_mutex_lock(&(pool->poolStorage->mutex));
+        pool->poolStorage->totalDataSize -= object->size;
+        pthread_mutex_unlock(&(pool->poolStorage->mutex));
+
         pthread_mutex_unlock(&(pool->mutex));
+
 
         pool->objectDestructor(object->pObject);
         pthread_mutex_destroy(&(object->mutex));
         free(object);
+    }
+    return;
+}
+
+void updateDataObjectSize(DataObject *object, int diffSize) {
+    if(object) {
+        pthread_mutex_lock(&(object->mutex));
+        object->size += diffSize;
+        pthread_mutex_unlock(&(object->mutex));
+
+        pthread_mutex_lock(&(object->pool->mutex));
+        object->pool->totalAllocSize += diffSize;
+        pthread_mutex_unlock(&(object->pool->mutex));
+
+        pthread_mutex_lock(&(object->pool->poolStorage->mutex));
+        object->pool->poolStorage->totalDataSize += diffSize;
+        pthread_mutex_unlock(&(object->pool->poolStorage->mutex));
     }
     return;
 }
@@ -113,13 +149,27 @@ DataObject *getOrCreateAvailableObject(DataPool *pool) {
     }
 
     if(!object) {
-        DBGPRINTF("getOrCreateAvailableObject in pool '%s', no free object, creating new\n", pool->poolName);
-        object = createDataObject();
-        void *pObject = pool->objectConstructor((void *)object);
+        if(poolStorage->totalDataSize >= poolStorage->maxDataSize) {
+            DBGPRINTF("WARNING: max memory usage reached, cannot create new objects\n");
+            pthread_mutex_unlock(&(pool->mutex));
+            return NULL;
+        }
 
-        if(pObject) {
-            object->pObject = pObject;
+        DBGPRINTF("getOrCreateAvailableObject in pool '%s', no free object, creating new\n", pool->poolName);
+        object = createDataObject(pool);
+        uint32_t sizeAlloc = (uint32_t)pool->objectConstructor((void *)object);
+
+        if(sizeAlloc > 0) {
+            object->size += sizeAlloc;
             addObjectToPool(pool, object);
+            object->pool->totalAllocSize += object->size;
+            object->pool->poolStorage->totalDataSize += object->size;
+        }
+        else {
+            pthread_mutex_destroy(&(object->mutex));
+            free(object);
+            pthread_mutex_unlock(&(pool->mutex));
+            return NULL;
         }
         DBGPRINTF("getOrCreateAvailableObject in pool '%s', new pool size: %u\n", pool->poolName, pool->listSize);
     }
@@ -155,6 +205,7 @@ DataPool *createPool(char *poolName, void* (*objectConstructor(void *)), void (*
         newPool->objectConstructor = objectConstructor;
         newPool->objectDestructor = objectDestructor;
         newPool->objectResetor = objectResetor;
+        newPool->totalAllocSize = sizeof(DataPool);
     }
     else {
         DBGPRINTF("ERROR: could not create new pool\n");
@@ -183,5 +234,31 @@ void destroyPool(DataPool *pool) {
     pthread_mutex_destroy(&(pool->mutex));
     free(pool);
 
+    return;
+}
+
+PoolStorage *initPoolStorage() {
+    PoolStorage *poolStorage = malloc(sizeof(PoolStorage));
+
+    if(poolStorage) {
+        poolStorage->head = NULL;
+        poolStorage->tail = NULL;
+        poolStorage->listSize = 0;
+        poolStorage->totalDataSize = 0;
+        poolStorage->maxDataSize = DEFAULT_MAX_POOL_STORAGE_SIZE;
+        pthread_mutex_init(&(poolStorage->mutex), NULL);
+        return poolStorage;
+
+    }
+
+    DBGPRINTF("ERROR: could not initialize pool storage\n");
+    return NULL;
+}
+
+void deletePoolStorage(PoolStorage *poolStorage) {
+    if(poolStorage) {
+        pthread_mutex_destroy(&(poolStorage->mutex));
+        free(poolStorage);
+    }
     return;
 }

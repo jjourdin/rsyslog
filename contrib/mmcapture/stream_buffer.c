@@ -35,15 +35,15 @@ static inline int initBuffer(StreamBuffer *sb) {
 
     if(sb->buffer) {
         sb->bufferSize = DEFAULT_BUFF_START_SIZE;
-        sb->object->size += DEFAULT_BUFF_START_SIZE;
         return 0;
     }
 
     return -1;
 }
 
-static inline void *streamBufferCreate(void *dObject) {
+static inline void *streamBufferCreate(void *object) {
     DBGPRINTF("streamBufferCreate\n");
+    DataObject *dObject = (DataObject *)object;
 
     StreamBuffer *sb = calloc(1, sizeof(StreamBuffer));
     if(sb) {
@@ -52,17 +52,17 @@ static inline void *streamBufferCreate(void *dObject) {
         pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
 
         sb->object = dObject;
-        sb->object->size = sizeof(StreamBuffer);
+        dObject->pObject = sb;
         if(initBuffer(sb) == 0) {
             pthread_mutex_init(&(sb->mutex), &attr);
             pthread_mutexattr_destroy(&attr);
-            return (void *)sb;
+            return (void *) sizeof(StreamBuffer) + DEFAULT_BUFF_START_SIZE;
         }
 
         free(sb);
     }
 
-    return NULL;
+    return (void *)0;
 }
 
 static inline void streamBufferDelete(void *sbObject) {
@@ -159,12 +159,16 @@ int streamBufferExtend(StreamBuffer *sb, uint32_t extLength) {
         sb->buffer = realloc(sb->buffer, sb->bufferSize + extLength);
         if(sb->buffer) {
             sb->bufferSize += extLength;
-            sb->object->size += extLength;
+            updateDataObjectSize(sb->object, (int)extLength);
             pthread_mutex_unlock(&(sb->mutex));
             return 0;
         }
         else {
             pthread_mutex_unlock(&(sb->mutex));
+
+            updateDataObjectSize(sb->object, (int)-sb->bufferSize);
+            sb->bufferSize = 0;
+
             DBGPRINTF("error while extending stream buffer\n");
         }
     }

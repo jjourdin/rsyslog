@@ -38,6 +38,8 @@ typedef struct DataObject_ {
     void *pObject;
     uint32_t size;
 
+    struct DataPool_ *pool;
+
     enum {
         EMPTY,
         INIT,
@@ -59,10 +61,13 @@ typedef struct DataPool_ {
     struct DataObject_ *head;
     struct DataObject_ *tail;
     uint32_t listSize;
+    uint32_t totalAllocSize;
 
     void* (*objectConstructor)(void *);
     void (*objectDestructor)(void *);
     void (*objectResetor)(void *);
+
+    struct PoolStorage_ *poolStorage;
 
     pthread_mutex_t mutex;
 
@@ -73,15 +78,22 @@ typedef struct DataPool_ {
 typedef struct PoolStorage_ {
     struct DataPool_ *head;
     struct DataPool_ *tail;
-    uint8_t size;
+    uint8_t listSize;
     uint32_t totalDataSize;
+    uint32_t maxDataSize;
+
+    pthread_mutex_t mutex;
 } PoolStorage;
 
+#define DEFAULT_MAX_POOL_STORAGE_SIZE   1024
 extern PoolStorage *poolStorage;
 
 void deleteDataObjectFromPool(DataObject *, DataPool *);
+void updateDataObjectSize(DataObject *, int);
 DataObject *getOrCreateAvailableObject(DataPool *);
 DataPool *createPool(char*, void* (*objectConstructor(void *)), void (*objectDestructor(void *)), void (*objectResetor(void *)));
 void destroyPool(DataPool *);
+PoolStorage *initPoolStorage();
+void deletePoolStorage(PoolStorage *);
 
 #endif /* DATA_POOL_H */

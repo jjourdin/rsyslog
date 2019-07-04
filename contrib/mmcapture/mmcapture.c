@@ -101,7 +101,8 @@ static struct cnfparamdescr actpdescr[] = {
     { "yaraScanType", eCmdHdlrGetWord, 0 },
     { "yaraScanMaxSize", eCmdHdlrPositiveInt, 0 },
     { "logFile", eCmdHdlrString, 0 },
-    { "threadsNumber", eCmdHdlrPositiveInt, 0 }
+    { "threadsNumber", eCmdHdlrPositiveInt, 0 },
+    { "maxMemoryUsage", eCmdHdlrPositiveInt, 0 }
 };
 
 static struct cnfparamblk actpblk = {
@@ -120,10 +121,15 @@ typedef struct WorkerDataContext_ {
 
 void *createWorkerDataContext(void *object) {
     DBGPRINTF("createWorkerDataContext\n");
+    DataObject *dObject = (DataObject *)object;
+
     WorkerDataContext *context = calloc(1, sizeof(WorkerDataContext));
-    context->object = object;
-    context->object->size = sizeof(WorkerDataContext);
-    return (void *)context;
+    if(context) {
+        context->object = dObject;
+        dObject->pObject = (void *)context;
+        return (void *)sizeof(WorkerDataContext);
+    }
+    return (void *)0;
 }
 
 void destroyWorkerDataContext(void *wdc) {
@@ -144,7 +150,7 @@ void resetWorkerDataContext(void *wdcObject) {
 
 void *workerDoWork(void *pData) {
     WorkerDataContext *context = (WorkerDataContext *)pData;
-    int ret;
+    int tcpStatus;
 
     Packet *pkt = getImpcapData(context->pMsg);
     msgDestruct(&(context->pMsg));
@@ -161,10 +167,10 @@ void *workerDoWork(void *pData) {
 
         if(pkt->flow && pkt->proto == IPPROTO_TCP) {
             pthread_mutex_lock(&(pkt->flow->mFlow));
-            ret = handleTcpFromPacket(pkt);
+            tcpStatus = handleTcpFromPacket(pkt);
             pthread_mutex_unlock(&(pkt->flow->mFlow));
 
-//            if(ret == 1) {
+//            if(tcpStatus == 1) {
 //                /* session is now closed */
 //                TcpSession *session = (TcpSession *) pkt->flow->protoCtx;
 //                tcpSessionDelete(session);
@@ -177,7 +183,7 @@ void *workerDoWork(void *pData) {
         struct json_object *yaraMeta = NULL;
 
         if(context->instanceData->globalYaraCnf->scanType == SCAN_STREAM &&
-           pkt->flow && pkt->proto == IPPROTO_TCP) {
+           pkt->flow && pkt->proto == IPPROTO_TCP && tcpStatus != -1) {
             StreamBuffer *sb;
             pthread_mutex_lock(&(pkt->flow->mFlow));
             TcpSession *session = (TcpSession *)pkt->flow->protoCtx;
@@ -191,7 +197,8 @@ void *workerDoWork(void *pData) {
 
             yaraMeta = yaraScan(pkt->payload, pkt->payloadLen, sb);
         }
-        else if(context->instanceData->globalYaraCnf->scanType == SCAN_PACKET_ONLY){
+        else if(context->instanceData->globalYaraCnf->scanType == SCAN_PACKET_ONLY ||
+                tcpStatus == -1){
             yaraMeta = yaraScan(pkt->payload, pkt->payloadLen, NULL);
         }
 
@@ -230,8 +237,13 @@ void *workerDoWork(void *pData) {
 }
 
 /* --- memory manager --- */
+typedef struct MemManagerParams_ {
+    Worker *self;
+    instanceData *instData;
+} MemManagerParams;
+
 void *memoryManagerDoWork(void *pData) {
-    Worker *self = (Worker *)pData;
+    MemManagerParams *params = (MemManagerParams *)pData;
     DBGPRINTF("memory manager started\n");
 
     struct timespec waitTime;
@@ -240,17 +252,16 @@ void *memoryManagerDoWork(void *pData) {
         clock_gettime(CLOCK_REALTIME, &waitTime);
         waitTime.tv_sec += 10;
 
-        pthread_mutex_lock(&(self->conf->mSignal));
-        pthread_cond_timedwait(&(self->conf->cSignal), &(self->conf->mSignal), &waitTime);
+        pthread_mutex_lock(&(params->self->conf->mSignal));
+        pthread_cond_timedwait(&(params->self->conf->cSignal), &(params->self->conf->mSignal), &waitTime);
 
-        if(self->sigStop) {
+        if(params->self->sigStop) {
             DBGPRINTF("memory manager closing\n");
-            pthread_mutex_unlock(&(self->conf->mSignal));
+            pthread_mutex_unlock(&(params->self->conf->mSignal));
             pthread_exit(0);
         }
 
         DBGPRINTF("memory manager launching cleanup\n");
-        poolStorage->totalDataSize = 0;
         DataPool *pool;
         for(pool = poolStorage->tail; pool != NULL; pool = pool->next) {
             pthread_mutex_lock(&(pool->mutex));
@@ -264,23 +275,25 @@ void *memoryManagerDoWork(void *pData) {
                 if(delete->state != USED) freeAmount++;
                 else usedAmount++;
 
-                if(delete->state != USED && delete->stale) {
+                if(delete->state != USED && delete->stale &&
+                    pool->listSize > params->instData->workersCnf->maxWorkers) {
                     deleteDataObjectFromPool(delete, pool);
-                    DBGPRINTF("memory manager deleting object in '%s', new listSize: %u\n", pool->poolName, pool->listSize);
+                    DBGPRINTF("memory manager deleting object in '%s', "
+                              "new listSize: %u\n", pool->poolName, pool->listSize);
                     continue;
                 }
                 else if(!delete->stale){
                     delete->stale = 1;
                 }
-                poolStorage->totalDataSize += delete->size;
                 pthread_mutex_unlock(&(delete->mutex));
             }
-            DBGPRINTF("memory manager: %u free, %u used in '%s'\n", freeAmount, usedAmount, pool->poolName);
             pthread_mutex_unlock(&(pool->mutex));
+            DBGPRINTF("memory manager: %u free, %u used in '%s', "
+                      "for %u total memory\n", freeAmount, usedAmount, pool->poolName, pool->totalAllocSize);
         }
 
         DBGPRINTF("memory manager cleanup finished, total memory used: %u\n", poolStorage->totalDataSize);
-        pthread_mutex_unlock(&(self->conf->mSignal));
+        pthread_mutex_unlock(&(params->self->conf->mSignal));
     }
 }
 
@@ -288,7 +301,7 @@ Worker *initMemoryManager() {
     Worker *worker = malloc(sizeof(Worker));
     WorkersCnf *conf = malloc(sizeof(WorkersCnf));
     if(!worker || !conf) {
-        DBGPRINTF("could not create worker and conf for memory manager "
+        DBGPRINTF("could not create worker and conf for memory manager, "
                   "memory allocation failed\n");
         return NULL;
     }
@@ -306,13 +319,17 @@ Worker *initMemoryManager() {
     return worker;
 }
 
-void startMemoryManager(Worker *memManager) {
+void startMemoryManager(Worker *memManager, instanceData *instData) {
     if(memManager) {
+        MemManagerParams *params = malloc(sizeof(MemManagerParams));
+        params->self = memManager;
+        params->instData = instData;
+
         pthread_attr_t attr;
         pthread_attr_init(&attr);
         pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
 
-        if(pthread_create(&(memManager->thread), &attr, memoryManagerDoWork, (void *)memManager) != 0) {
+        if(pthread_create(&(memManager->thread), &attr, memoryManagerDoWork, (void *)params) != 0) {
             memManager->thread = NULL;
             pthread_attr_destroy(&attr);
             return -1;
@@ -362,7 +379,7 @@ ENDfreeCnf
 BEGINcreateInstance
     DBGPRINTF("entering createInstance\n");
 CODESTARTcreateInstance
-    poolStorage = calloc(1, sizeof(PoolStorage));
+    poolStorage = initPoolStorage();
     pData->globalStreamsCnf = calloc(1, sizeof(StreamsCnf));
     pData->globalFlowCnf = calloc(1, sizeof(FlowCnf));
     pData->globalYaraCnf = calloc(1, sizeof(YaraCnf));
@@ -388,7 +405,7 @@ CODESTARTfreeInstance
     deleteFileStruct(pData->logFile);
     destroyPool(pData->workerDataContextPool);
     destroyTCPPools();
-    free(poolStorage);
+    deletePoolStorage(poolStorage);
 ENDfreeInstance
 
 BEGINfreeWrkrInstance
@@ -494,6 +511,10 @@ CODE_STD_STRING_REQUESTnewActInst(1)
             }
             DBGPRINTF("threads number set to %u\n", pData->workersCnf->maxWorkers);
         }
+        else if(!strcmp(actpblk.descr[i].name, "maxMemoryUsage")) {
+            poolStorage->maxDataSize = (uint32_t) pvals[i].val.d.n * 1024 * 1024;
+            DBGPRINTF("max memory usage set to %uMB\n", (uint32_t)poolStorage->maxDataSize/1024/1024);
+        }
         else {
             LogError(0, RS_RET_PARAM_ERROR, "mmcapture: unhandled parameter '%s'\n", actpblk.descr[i].name);
         }
@@ -533,7 +554,7 @@ CODESTARTdoAction
             addWorkerToConf(pData->workersCnf);
         }
 
-        startMemoryManager(pData->memoryManager);
+        startMemoryManager(pData->memoryManager, pData);
     }
 
     DataObject *wdcObject = getOrCreateAvailableObject(pData->workerDataContextPool);
@@ -542,7 +563,8 @@ CODESTARTdoAction
         context = wdcObject->pObject;
     }
     else {
-        DBGPRINTF("ERROR: WorkerDataContext NULL\n");
+        DBGPRINTF("WARNING: could not get object to handle new msg, dropping\n");
+        return 0;
     }
 
     context->pMsg = MsgAddRef(pMsg);
@@ -554,7 +576,13 @@ CODESTARTdoAction
         work = wdObject->pObject;
     }
     else {
-        DBGPRINTF("ERROR: WorkerData NULL\n");
+        msgDestruct(&(context->pMsg));
+        context->pMsg = NULL;
+        pthread_mutex_lock(&(context->object->mutex));
+        context->object->state = AVAILABLE;
+        pthread_mutex_unlock(&(context->object->mutex));
+        DBGPRINTF("WARNING: could not get object to handle new msg, dropping\n");
+        return 0;
     }
 
     work->pData = (void *)context;

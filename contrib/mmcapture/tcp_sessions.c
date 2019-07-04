@@ -32,17 +32,18 @@ DataPool *queuePool;
 DataPool *connPool;
 DataPool *sessPool;
 
-static inline void *tcpQueueCreate(void *dataObject) {
+static inline void *tcpQueueCreate(void *object) {
     DBGPRINTF("tcpQueueCreate\n");
+    DataObject *dObject = (DataObject *)object;
 
     TcpQueue *queue = calloc(1, sizeof(TcpQueue));
     if(queue) {
-        queue->object = dataObject;
-        queue->object->size = sizeof(TcpQueue);
-        return (void *)queue;
+        queue->object = dObject;
+        dObject->pObject = (void *)queue;
+        return (void *)sizeof(TcpQueue);
     }
     DBGPRINTF("ERROR: could not create new TcpQueue\n");
-    return NULL;
+    return (void *)0;
 }
 
 static inline void tcpQueueDelete(void *queueObject) {
@@ -75,30 +76,29 @@ static inline void tcpQueueReset(void *queueObject) {
     return;
 }
 
-static inline void *tcpConnectionCreate(void *dataObject) {
+static inline void *tcpConnectionCreate(void *object) {
     DBGPRINTF("tcpConnectionCreate\n");
+    DataObject *dObject = (DataObject *)object;
 
     TcpConnection *conn = calloc(1, sizeof(TcpConnection));
     if(conn) {
-        conn->object = dataObject;
-        conn->object->size = sizeof(TcpConnection);
+        conn->object = dObject;
+        dObject->pObject = (void *)conn;
         DataObject *sbObject = getOrCreateAvailableObject(streamsCnf->sbPool);
         if(sbObject) {
             conn->streamBuffer = sbObject->pObject;
+            return (void *)sizeof(TcpConnection);
         }
         else {
-            DBGPRINTF("ERROR: could not get new StreamBuffer from pool\n");
+            free(conn);
+            dObject->pObject = NULL;
+            DBGPRINTF("WARNING: could not get new StreamBuffer from pool, aborting TcpConnection object creation\n");
+            return NULL;
         }
-
-        if(conn->streamBuffer) {
-            return conn;
-        }
-
-        free(conn);
     }
 
     DBGPRINTF("ERROR: could not create new TcpConnection\n");
-    return NULL;
+    return (void *)0;
 }
 
 static inline void tcpConnectionDelete(void *connObject) {
@@ -142,18 +142,20 @@ static inline void tcpConnectionReset(void *connObject) {
     return;
 }
 
-static inline void *tcpSessionCreate(void *dataObject) {
+static inline void *tcpSessionCreate(void *object) {
     DBGPRINTF("tcpSessionCreate\n");
+    DataObject *dObject = (DataObject *)object;
 
     TcpSession *tcpSession = calloc(1, sizeof(TcpSession));
 
     if(tcpSession) {
-        tcpSession->object = dataObject;
-        tcpSession->object->size = sizeof(TcpSession);
+        tcpSession->object = dObject;
+        dObject->pObject = (void *)tcpSession;
         DataObject *srcConnObject = getOrCreateAvailableObject(connPool);
         DataObject *dstConnObject = getOrCreateAvailableObject(connPool);
+
         if(!srcConnObject || !dstConnObject) {
-            DBGPRINTF("ERROR: could not get new TcpConnection objects for new TcpSession\n");
+            DBGPRINTF("WARNING: could not get new TcpConnection objects, aborting\n");
             free(tcpSession);
             if(srcConnObject) {
                 pthread_mutex_lock(&(srcConnObject->mutex));
@@ -165,15 +167,16 @@ static inline void *tcpSessionCreate(void *dataObject) {
                 dstConnObject->state = AVAILABLE;
                 pthread_mutex_unlock(&(dstConnObject->mutex));
             }
-            return NULL;
+            return (void *)0;
         }
+
         tcpSession->cCon = srcConnObject->pObject;
         tcpSession->sCon = dstConnObject->pObject;
-        return tcpSession;
+        return (void *)sizeof(TcpSession);
     }
 
-    DBGPRINTF("could not create new TcpSession\n");
-    return NULL;
+    DBGPRINTF("ERROR: could not create new TcpSession\n");
+    return (void *)0;
 }
 
 static inline void tcpSessionDelete(void *sessionObject) {
@@ -238,6 +241,10 @@ static inline TcpQueue *packetEnqueue(Packet *pkt) {
     DataObject *queueObject = getOrCreateAvailableObject(queuePool);
     TcpQueue *queue;
     if(queueObject) queue = queueObject->pObject;
+    else {
+        DBGPRINTF("WARNING: could not get new TcpQueue object, aborting\n");
+        return NULL;
+    }
 
     if(queue) {
         strncpy(queue->tcp_flags, pkt->tcph->flags, 10);
@@ -246,7 +253,7 @@ static inline TcpQueue *packetEnqueue(Packet *pkt) {
         queue->dataLength = pkt->tcph->TCPDataLength;
         if(queue->dataLength) {
             queue->data = calloc(1, queue->dataLength);
-            queue->object->size += queue->dataLength;
+            updateDataObjectSize(queue->object, queue->dataLength);
             memcpy(queue->data, pkt->payload, queue->dataLength);
         }
     }
@@ -496,13 +503,17 @@ int handleTcpFromPacket(Packet *pkt) {
             if(!session) {
                 DataObject *sessionObject = getOrCreateAvailableObject(sessPool);
                 if(!sessionObject) {
-                    DBGPRINTF("ERROR: could not get new TcpSession\n");
+                    DBGPRINTF("WARNING: could not get new TcpSession, dropping session handling\n");
                     return -1;
                 }
                 session = sessionObject->pObject;
 
                 tcpSessionInitFromPacket(session, pkt);
                 TcpQueue *tcpQueue = packetEnqueue(pkt);
+                if(!tcpQueue) {
+                    DBGPRINTF("WARNING: couldn't enqueue packet, dropping session handling\n");
+                    return -1;
+                }
                 tcpConnectionInsertToQueue(session->cCon, tcpQueue);
                 tcpQueue->used = 1;
                 pkt->flow->protoCtx = (void *)session;
@@ -511,6 +522,10 @@ int handleTcpFromPacket(Packet *pkt) {
             {
                 TcpConnection *srcCon, *dstCon;
                 TcpQueue *tcpQueue = packetEnqueue(pkt);
+                if(!tcpQueue) {
+                    DBGPRINTF("WARNING: couldn't enqueue packet, dropping session handling\n");
+                    return -1;
+                }
                 srcCon = getTcpSrcConnectionFromPacket(session, pkt);
                 dstCon = getTcpDstConnectionFromPacket(session, pkt);
 
@@ -556,7 +571,6 @@ int handleTcpFromPacket(Packet *pkt) {
                     }
                 }
             }
-            //printTcpSessionInfo(session);
 
             return 0;
         }

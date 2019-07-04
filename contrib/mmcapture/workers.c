@@ -200,15 +200,17 @@ int removeWorkerFromConf(Worker *worker, WorkersCnf *conf) {
     return -1;
 }
 
-static inline void *createWorkerData(void *dObject) {
+static inline void *createWorkerData(void *object) {
     DBGPRINTF("createWorkerData\n");
+    DataObject *dObject = (DataObject *)object;
 
     WorkerData *wd = calloc(1, sizeof(WorkerData));
     if(wd) {
         wd->object = dObject;
-        wd->object->size = sizeof(WorkerData);
+        dObject->pObject = (void *)wd;
+        return (void *)sizeof(WorkerData);
     }
-    return (void *)wd;
+    return (void *)0;
 }
 
 static inline void destroyWorkerData(void *wdObject) {
