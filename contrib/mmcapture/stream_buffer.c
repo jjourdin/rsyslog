@@ -35,6 +35,7 @@ static inline int initBuffer(StreamBuffer *sb) {
 
     if(sb->buffer) {
         sb->bufferSize = DEFAULT_BUFF_START_SIZE;
+        sb->object->size += DEFAULT_BUFF_START_SIZE;
         return 0;
     }
 
@@ -46,8 +47,9 @@ static inline void *streamBufferCreate(void *dObject) {
 
     StreamBuffer *sb = calloc(1, sizeof(StreamBuffer));
     if(sb) {
+        sb->object = dObject;
+        sb->object->size = sizeof(StreamBuffer);
         if(initBuffer(sb) == 0) {
-            sb->object = dObject;
             return (void *)sb;
         }
 
@@ -93,7 +95,7 @@ void streamInitConfig(StreamsCnf *conf) {
     DBGPRINTF("streamInitConfig\n");
     memset(conf, 0, sizeof(StreamsCnf));
 
-    conf->sbPool = createPool(streamBufferCreate, streamBufferDelete, streamBufferReset);
+    conf->sbPool = createPool("streamBufferPool", streamBufferCreate, streamBufferDelete, streamBufferReset);
 
     streamsCnf = conf;
     return;
@@ -143,6 +145,7 @@ int streamBufferExtend(StreamBuffer *sb, uint32_t extLength) {
         sb->buffer = realloc(sb->buffer, sb->bufferSize + extLength);
         if(sb->buffer) {
             sb->bufferSize += extLength;
+            sb->object->size += extLength;
             return 0;
         }
         else {

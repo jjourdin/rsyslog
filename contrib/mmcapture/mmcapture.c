@@ -77,6 +77,7 @@ typedef struct instanceData_s {
     YaraCnf *globalYaraCnf;
     WorkersCnf *workersCnf;
     FileStruct *logFile;
+    Worker *memoryManager;
 
     DataPool *workerDataContextPool;
 } instanceData;
@@ -109,7 +110,7 @@ static struct cnfparamblk actpblk = {
     actpdescr
 };
 
-/* workers context */
+/* --- workers context --- */
 typedef struct WorkerDataContext_ {
     smsg_t *pMsg;
     instanceData *instanceData;
@@ -121,6 +122,7 @@ void *createWorkerDataContext(void *object) {
     DBGPRINTF("createWorkerDataContext\n");
     WorkerDataContext *context = calloc(1, sizeof(WorkerDataContext));
     context->object = object;
+    context->object->size = sizeof(WorkerDataContext);
     return (void *)context;
 }
 
@@ -225,6 +227,104 @@ void *workerDoWork(void *pData) {
     return NULL;
 }
 
+/* --- memory manager --- */
+void *memoryManagerDoWork(void *pData) {
+    Worker *self = (Worker *)pData;
+    DBGPRINTF("memory manager started\n");
+
+    struct timespec waitTime;
+
+    while(1) {
+        clock_gettime(CLOCK_REALTIME, &waitTime);
+        waitTime.tv_sec += 10;
+
+        pthread_mutex_lock(&(self->conf->mSignal));
+        pthread_cond_timedwait(&(self->conf->cSignal), &(self->conf->mSignal), &waitTime);
+
+        if(self->sigStop) {
+            DBGPRINTF("memory manager closing\n");
+            pthread_mutex_unlock(&(self->conf->mSignal));
+            pthread_exit(0);
+        }
+
+        DBGPRINTF("memory manager launching cleanup\n");
+        poolStorage->totalDataSize = 0;
+        DataPool *pool;
+        for(pool = poolStorage->tail; pool != NULL; pool = pool->next) {
+            pthread_mutex_lock(&(pool->mutex));
+            uint32_t freeAmount = 0, usedAmount = 0;
+            DataObject *object = pool->tail, *delete;
+            while(object) {
+                delete = object;
+                object = object->next;
+                pthread_mutex_lock(&(delete->mutex));
+
+                if(delete->state != USED) freeAmount++;
+                else usedAmount++;
+
+                if(delete->state != USED && delete->stale) {
+                    deleteDataObjectFromPool(delete, pool);
+                    DBGPRINTF("memory manager deleting object in '%s', new listSize: %u\n", pool->poolName, pool->listSize);
+                    continue;
+                }
+                else if(!delete->stale){
+                    delete->stale = 1;
+                }
+                poolStorage->totalDataSize += delete->size;
+                pthread_mutex_unlock(&(delete->mutex));
+            }
+            DBGPRINTF("memory manager: %u free, %u used in '%s'\n", freeAmount, usedAmount, pool->poolName);
+            pthread_mutex_unlock(&(pool->mutex));
+        }
+
+        DBGPRINTF("memory manager cleanup finished, total memory used: %u\n", poolStorage->totalDataSize);
+        pthread_mutex_unlock(&(self->conf->mSignal));
+    }
+}
+
+Worker *initMemoryManager() {
+    Worker *worker = malloc(sizeof(Worker));
+    WorkersCnf *conf = malloc(sizeof(WorkersCnf));
+    if(!worker || !conf) {
+        DBGPRINTF("could not create worker and conf for memory manager "
+                  "memory allocation failed\n");
+        return NULL;
+    }
+
+    conf->workFunction = memoryManagerDoWork;
+    conf->maxWorkers = 1;
+    conf->workersListHead = worker;
+    conf->workersNumber = 1;
+    pthread_mutex_init(&(conf->mSignal), NULL);
+    pthread_cond_init(&(conf->cSignal), NULL);
+
+    worker->sigStop = 0;
+    worker->conf = conf;
+
+    return worker;
+}
+
+void startMemoryManager(Worker *memManager) {
+    if(memManager) {
+        pthread_attr_t attr;
+        pthread_attr_init(&attr);
+        pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+
+        if(pthread_create(&(memManager->thread), &attr, memoryManagerDoWork, (void *)memManager) != 0) {
+            memManager->thread = NULL;
+            pthread_attr_destroy(&attr);
+            return -1;
+        }
+
+        pthread_attr_destroy(&attr);
+        return 0;
+    }
+    else {
+        DBGPRINTF("cannot start memory manager: object given is not initialised\n");
+    }
+    return -1;
+}
+
 /* init instance, set parameters */
 
 BEGINbeginCnfLoad
@@ -260,13 +360,15 @@ ENDfreeCnf
 BEGINcreateInstance
     DBGPRINTF("entering createInstance\n");
 CODESTARTcreateInstance
+    poolStorage = calloc(1, sizeof(PoolStorage));
     pData->globalStreamsCnf = calloc(1, sizeof(StreamsCnf));
     pData->globalFlowCnf = calloc(1, sizeof(FlowCnf));
     pData->globalYaraCnf = calloc(1, sizeof(YaraCnf));
     pData->workersCnf = calloc(1, sizeof(WorkersCnf));
     pData->logFile = createFileStruct();
-    pData->workerDataContextPool = createPool(createWorkerDataContext, destroyWorkerDataContext, resetWorkerDataContext);
+    pData->workerDataContextPool = createPool("workerDataContextPool", createWorkerDataContext, destroyWorkerDataContext, resetWorkerDataContext);
     initTCPPools();
+    pData->memoryManager = initMemoryManager();
 ENDcreateInstance
 
 BEGINcreateWrkrInstance
@@ -277,13 +379,14 @@ ENDcreateWrkrInstance
 BEGINfreeInstance
     DBGPRINTF("entering freeInstance\n");
 CODESTARTfreeInstance
+    workersDeleteConfig(pData->workersCnf);
     streamDeleteConfig(pData->globalStreamsCnf);
     flowDeleteConfig(pData->globalFlowCnf);
     yaraDeleteConfig(pData->globalYaraCnf);
-    workersDeleteConfig(pData->workersCnf);
     deleteFileStruct(pData->logFile);
     destroyPool(pData->workerDataContextPool);
     destroyTCPPools();
+    free(poolStorage);
 ENDfreeInstance
 
 BEGINfreeWrkrInstance
@@ -427,6 +530,8 @@ CODESTARTdoAction
         for(thread = 0; thread < pData->workersCnf->maxWorkers; thread++) {
             addWorkerToConf(pData->workersCnf);
         }
+
+        startMemoryManager(pData->memoryManager);
     }
 
     DataObject *wdcObject = getOrCreateAvailableObject(pData->workerDataContextPool);

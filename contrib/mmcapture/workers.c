@@ -204,7 +204,10 @@ static inline void *createWorkerData(void *dObject) {
     DBGPRINTF("createWorkerData\n");
 
     WorkerData *wd = calloc(1, sizeof(WorkerData));
-    if(wd) wd->object = dObject;
+    if(wd) {
+        wd->object = dObject;
+        wd->object->size = sizeof(WorkerData);
+    }
     return (void *)wd;
 }
 
@@ -237,7 +240,7 @@ int workersInitConfig(WorkersCnf *conf) {
     conf->pDataListHead = NULL;
     conf->pDataListTail = NULL;
     conf->listSize = 0;
-    conf->workerDataPool = createPool(createWorkerData, destroyWorkerData, resetWorkerData);
+    conf->workerDataPool = createPool("workersDataPool", createWorkerData, destroyWorkerData, resetWorkerData);
     pthread_mutex_init(&(conf->mSignal), NULL);
     pthread_cond_init(&(conf->cSignal), NULL);
 

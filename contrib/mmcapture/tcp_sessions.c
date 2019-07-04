@@ -38,6 +38,7 @@ static inline void *tcpQueueCreate(void *dataObject) {
     TcpQueue *queue = calloc(1, sizeof(TcpQueue));
     if(queue) {
         queue->object = dataObject;
+        queue->object->size = sizeof(TcpQueue);
         return (void *)queue;
     }
     DBGPRINTF("ERROR: could not create new TcpQueue\n");
@@ -80,6 +81,7 @@ static inline void *tcpConnectionCreate(void *dataObject) {
     TcpConnection *conn = calloc(1, sizeof(TcpConnection));
     if(conn) {
         conn->object = dataObject;
+        conn->object->size = sizeof(TcpConnection);
         DataObject *sbObject = getOrCreateAvailableObject(streamsCnf->sbPool);
         if(sbObject) {
             conn->streamBuffer = sbObject->pObject;
@@ -146,6 +148,8 @@ static inline void *tcpSessionCreate(void *dataObject) {
     TcpSession *tcpSession = calloc(1, sizeof(TcpSession));
 
     if(tcpSession) {
+        tcpSession->object = dataObject;
+        tcpSession->object->size = sizeof(TcpSession);
         DataObject *srcConnObject = getOrCreateAvailableObject(connPool);
         DataObject *dstConnObject = getOrCreateAvailableObject(connPool);
         if(!srcConnObject || !dstConnObject) {
@@ -205,9 +209,9 @@ static inline void tcpSessionReset(void *sessionObject) {
 int initTCPPools() {
     DBGPRINTF("initTCPPools\n");
 
-    queuePool = createPool(tcpQueueCreate, tcpQueueDelete, tcpQueueReset);
-    connPool = createPool(tcpConnectionCreate, tcpConnectionDelete, tcpConnectionReset);
-    sessPool = createPool(tcpSessionCreate, tcpSessionDelete, tcpSessionReset);
+    queuePool = createPool("tcpQueuePool", tcpQueueCreate, tcpQueueDelete, tcpQueueReset);
+    connPool = createPool("tcpConnectionPool", tcpConnectionCreate, tcpConnectionDelete, tcpConnectionReset);
+    sessPool = createPool("tcpSessionPool", tcpSessionCreate, tcpSessionDelete, tcpSessionReset);
     return !queuePool || !connPool || !sessPool;
 }
 
@@ -242,6 +246,7 @@ static inline TcpQueue *packetEnqueue(Packet *pkt) {
         queue->dataLength = pkt->tcph->TCPDataLength;
         if(queue->dataLength) {
             queue->data = calloc(1, queue->dataLength);
+            queue->object->size += queue->dataLength;
             memcpy(queue->data, pkt->payload, queue->dataLength);
         }
     }
