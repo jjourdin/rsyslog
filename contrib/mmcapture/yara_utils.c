@@ -212,7 +212,7 @@ struct json_object *yaraScan(uint8_t *buffer, uint32_t buffLen, StreamBuffer *sb
     struct json_object *rules = json_object_new_array();
     uint8_t newRules = 0;
 
-    if(globalYaraCnf->scanType == SCAN_PACKET_ONLY) {
+    if(!sb) {
         DBGPRINTF("YARA: initializing packet scan\n");
         if(buffer && buffLen) {
             elem->buffer = buffer;
@@ -225,23 +225,18 @@ struct json_object *yaraScan(uint8_t *buffer, uint32_t buffLen, StreamBuffer *sb
     }
     else {
         DBGPRINTF("YARA: initializing stream scan\n");
-        if(sb) {
-            pthread_mutex_lock(&(sb->mutex));
-            if(globalYaraCnf->scanMaxSize >= sb->bufferFill) {
-                elem->buffer = sb->buffer;
-                elem->length = sb->bufferFill;
-            }
-            else {
-                DBGPRINTF("YARA: base stream buffer address: %p\n", sb->buffer);
-                DBGPRINTF("YARA: stream buffer fill: %u\n", sb->bufferFill);
-                elem->buffer = sb->buffer + sb->bufferFill - globalYaraCnf->scanMaxSize - 1;
-                elem->length = globalYaraCnf->scanMaxSize;
-            }
-            elem->status |= YSE_READY;
+        pthread_mutex_lock(&(sb->mutex));
+        if(globalYaraCnf->scanMaxSize >= sb->bufferFill) {
+            elem->buffer = sb->buffer;
+            elem->length = sb->bufferFill;
         }
         else {
-            DBGPRINTF("YARA: trying to launch stream scan without providing StreamBuffer\n");
+            DBGPRINTF("YARA: base stream buffer address: %p\n", sb->buffer);
+            DBGPRINTF("YARA: stream buffer fill: %u\n", sb->bufferFill);
+            elem->buffer = sb->buffer + sb->bufferFill - globalYaraCnf->scanMaxSize - 1;
+            elem->length = globalYaraCnf->scanMaxSize;
         }
+        elem->status |= YSE_READY;
     }
 
     if(elem->length) {
@@ -259,7 +254,7 @@ struct json_object *yaraScan(uint8_t *buffer, uint32_t buffLen, StreamBuffer *sb
             for(i = 0; i < elem->ruleList->fill; i++) {
                 YR_RULE *rule = elem->ruleList->list[i];
 
-                if(globalYaraCnf->scanType == SCAN_STREAM && yaraIsRuleInList(sb->ruleList, rule)) {
+                if(sb && yaraIsRuleInList(sb->ruleList, rule)) {
                     continue;
                 }
                 else {
