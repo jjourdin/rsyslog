@@ -36,6 +36,7 @@
 
 typedef struct DataObject_ {
     void *pObject;
+    uint32_t size;
 
     enum {
         EMPTY,
@@ -44,6 +45,8 @@ typedef struct DataObject_ {
         USED
     } state;
 
+    uint8_t stale;
+
     pthread_mutex_t mutex;
 
     struct DataObject_ *prev;
@@ -51,6 +54,8 @@ typedef struct DataObject_ {
 } DataObject;
 
 typedef struct DataPool_ {
+    char poolName[50];
+
     struct DataObject_ *head;
     struct DataObject_ *tail;
     uint32_t listSize;
@@ -60,10 +65,23 @@ typedef struct DataPool_ {
     void (*objectResetor)(void *);
 
     pthread_mutex_t mutex;
+
+    struct DataPool_ *prev;
+    struct DataPool_ *next;
 } DataPool;
 
+typedef struct PoolStorage_ {
+    struct DataPool_ *head;
+    struct DataPool_ *tail;
+    uint8_t size;
+    uint32_t totalDataSize;
+} PoolStorage;
+
+extern PoolStorage *poolStorage;
+
+void deleteDataObjectFromPool(DataObject *, DataPool *);
 DataObject *getOrCreateAvailableObject(DataPool *);
-DataPool *createPool(void* (*objectConstructor(void *)), void (*objectDestructor(void *)), void (*objectResetor(void *)));
+DataPool *createPool(char*, void* (*objectConstructor(void *)), void (*objectDestructor(void *)), void (*objectResetor(void *)));
 void destroyPool(DataPool *);
 
 #endif /* DATA_POOL_H */
