@@ -47,9 +47,15 @@ static inline void *streamBufferCreate(void *dObject) {
 
     StreamBuffer *sb = calloc(1, sizeof(StreamBuffer));
     if(sb) {
+        pthread_mutexattr_t attr;
+        pthread_mutexattr_init(&attr);
+        pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+
         sb->object = dObject;
         sb->object->size = sizeof(StreamBuffer);
         if(initBuffer(sb) == 0) {
+            pthread_mutex_init(&(sb->mutex), &attr);
+            pthread_mutexattr_destroy(&attr);
             return (void *)sb;
         }
 
@@ -64,6 +70,8 @@ static inline void streamBufferDelete(void *sbObject) {
 
     if(sbObject) {
         StreamBuffer *sb = (StreamBuffer *)sbObject;
+
+        pthread_mutex_destroy(&(sb->mutex));
 
         if(sb->bufferDump) {
             streamBufferDumpToFile(sb);
@@ -130,10 +138,14 @@ uint32_t streamBufferDumpToFile(StreamBuffer *sb) {
     DBGPRINTF("streamBufferDumpToFile\n");
     uint32_t writeAmount = 0;
 
+    pthread_mutex_lock(&(sb->mutex));
+
     if(sb->bufferDump->pFile) {
         addDataToFile((char *)(sb->buffer), sb->bufferFill, sb->streamOffset, sb->bufferDump);
         writeAmount += sb->bufferFill;
     }
+
+    pthread_mutex_unlock(&(sb->mutex));
 
     return writeAmount;
 }
@@ -142,13 +154,17 @@ int streamBufferExtend(StreamBuffer *sb, uint32_t extLength) {
     DBGPRINTF("streamBufferExtend: extLength=%u\n", extLength);
 
     if(sb) {
+        pthread_mutex_lock(&(sb->mutex));
+
         sb->buffer = realloc(sb->buffer, sb->bufferSize + extLength);
         if(sb->buffer) {
             sb->bufferSize += extLength;
             sb->object->size += extLength;
+            pthread_mutex_unlock(&(sb->mutex));
             return 0;
         }
         else {
+            pthread_mutex_unlock(&(sb->mutex));
             DBGPRINTF("error while extending stream buffer\n");
         }
     }
@@ -163,11 +179,15 @@ static inline void streamBufferShift(StreamBuffer *sb, int amount) {
     DBGPRINTF("streamBufferShift, amount=%u\n", amount);
 
     if(sb) {
+        pthread_mutex_lock(&(sb->mutex));
+
         if(amount > sb->bufferSize) amount = sb->bufferSize;
         if(sb->bufferDump) addDataToFile(sb->buffer, amount, sb->streamOffset, sb->bufferDump);
         memmove(sb->buffer, sb->buffer + amount, sb->bufferFill - amount);
         sb->bufferFill -= amount;
         sb->streamOffset += amount;
+
+        pthread_mutex_unlock(&(sb->mutex));
     }
     else {
         DBGPRINTF("streamBufferShift: ERROR trying to shift StreamBuffer, but object is NULL\n");
@@ -186,6 +206,8 @@ int streamBufferAddDataSegment(StreamBuffer *sb, uint32_t dataLength, uint8_t *d
     DBGPRINTF("streamBufferAddDataSegment, dataLength: %u\n", dataLength);
 
     if(sb) {
+        pthread_mutex_lock(&(sb->mutex));
+
         if(dataLength > streamsCnf->streamMaxBufferSize) {
             DBGPRINTF("dataLength is too high (%u)for buffer and its max size, "
                       "capping at %u\n", dataLength, streamsCnf->streamMaxBufferSize);
@@ -208,6 +230,8 @@ int streamBufferAddDataSegment(StreamBuffer *sb, uint32_t dataLength, uint8_t *d
         }
         memcpy(sb->buffer + sb->bufferFill, data, dataLength);
         sb->bufferFill += dataLength;
+
+        pthread_mutex_unlock(&(sb->mutex));
 
         return 0;
     }

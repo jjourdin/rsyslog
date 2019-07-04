@@ -226,6 +226,7 @@ struct json_object *yaraScan(uint8_t *buffer, uint32_t buffLen, StreamBuffer *sb
     else {
         DBGPRINTF("YARA: initializing stream scan\n");
         if(sb) {
+            pthread_mutex_lock(&(sb->mutex));
             if(globalYaraCnf->scanMaxSize >= sb->bufferFill) {
                 elem->buffer = sb->buffer;
                 elem->length = sb->bufferFill;
@@ -244,7 +245,6 @@ struct json_object *yaraScan(uint8_t *buffer, uint32_t buffLen, StreamBuffer *sb
     }
 
     if(elem->length) {
-        DBGPRINTF("YARA: scanning %u bytes at %p\n", elem->length, elem->buffer);
         if(yaraScanStreamElem(elem, 0, 1)) {
             DBGPRINTF("YARA: error while trying to launch scan\n");
         }
@@ -279,11 +279,15 @@ struct json_object *yaraScan(uint8_t *buffer, uint32_t buffLen, StreamBuffer *sb
             }
         }
     }
+    if(sb) pthread_mutex_unlock(&(sb->mutex));
 
     yaraDeleteRuleList(elem->ruleList);
     free(elem);
     if(newRules)    return rules;
-    else            return NULL;
+    else {
+        fjson_object_put(rules);
+        return NULL;
+    }
 }
 
 void yaraErrorCallback(int errorLevel, const char *fileName, int lineNumber, const char *message, void *userData) {

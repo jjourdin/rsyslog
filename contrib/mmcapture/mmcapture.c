@@ -179,6 +179,7 @@ void *workerDoWork(void *pData) {
         if(context->instanceData->globalYaraCnf->scanType == SCAN_STREAM &&
            pkt->flow && pkt->proto == IPPROTO_TCP) {
             StreamBuffer *sb;
+            pthread_mutex_lock(&(pkt->flow->mFlow));
             TcpSession *session = (TcpSession *)pkt->flow->protoCtx;
             if(getPacketFlowDirection(pkt->flow, pkt) == TO_SERVER) {
                 sb = session->cCon->streamBuffer;
@@ -186,6 +187,7 @@ void *workerDoWork(void *pData) {
             else {
                 sb = session->sCon->streamBuffer;
             }
+            pthread_mutex_unlock(&(pkt->flow->mFlow));
 
             yaraMeta = yaraScan(pkt->payload, pkt->payloadLen, sb);
         }

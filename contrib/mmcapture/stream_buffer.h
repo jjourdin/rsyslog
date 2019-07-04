@@ -57,6 +57,8 @@ typedef struct StreamBuffer_ {
 
     FileStruct *bufferDump;
 
+    pthread_mutex_t mutex;
+
     DataObject *object;
 } StreamBuffer;
 

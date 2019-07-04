@@ -116,8 +116,8 @@ FILE* openFile(const char* path, const char* file_name){
     if(!dir) {
         DBGPRINTF("folder doesn't exist, creating\n");
         createFolder(path);
+        dir = opendir(path);
     }
-    dir = opendir(path);
 
     if(dir != NULL){
         new_file_comp_path = malloc(strlen(path)+1+strlen(file_name)+1);
