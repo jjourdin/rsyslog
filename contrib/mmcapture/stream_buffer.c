@@ -90,11 +90,16 @@ void streamBufferReset(void *sbObject) {
 
     if(sbObject) {
         StreamBuffer *sb = (StreamBuffer *)sbObject;
-        sb->bufferSize = 0;
         sb->bufferFill = 0;
         sb->streamOffset = 0;
-        if(sb->ruleList) yaraDeleteRuleList(sb->ruleList);
-        if(sb->bufferDump) deleteFileStruct(sb->bufferDump);
+        if(sb->ruleList) {
+            yaraDeleteRuleList(sb->ruleList);
+            sb->ruleList = NULL;
+        }
+        if(sb->bufferDump) {
+            deleteFileStruct(sb->bufferDump);
+            sb->bufferDump = NULL;
+        }
     }
     return;
 }
