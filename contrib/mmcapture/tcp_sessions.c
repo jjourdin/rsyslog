@@ -40,7 +40,10 @@ static inline void *tcpQueueCreate(void *object) {
     if(queue) {
         queue->object = dObject;
         dObject->pObject = (void *)queue;
-        return (void *)sizeof(TcpQueue);
+        queue->data = calloc(1, DEFAULT_QUEUE_BUFFER_SIZE);
+        if(queue->data) queue->dataBufferSize = DEFAULT_QUEUE_BUFFER_SIZE;
+        else queue->dataBufferSize = 0;
+        return (void *)sizeof(TcpQueue) + queue->dataBufferSize;
     }
     DBGPRINTF("ERROR: could not create new TcpQueue\n");
     return (void *)0;
@@ -68,10 +71,6 @@ static inline void tcpQueueReset(void *queueObject) {
         queue->used = 0;
         queue->prev = NULL;
         queue->next = NULL;
-        if(queue->data) {
-            free(queue->data);
-            queue->data = NULL;
-        }
     }
     return;
 }
@@ -252,8 +251,19 @@ static inline TcpQueue *packetEnqueue(Packet *pkt) {
         queue->ack = pkt->tcph->ack;
         queue->dataLength = pkt->tcph->TCPDataLength;
         if(queue->dataLength) {
-            queue->data = calloc(1, queue->dataLength);
-            updateDataObjectSize(queue->object, queue->dataLength);
+            if(queue->dataLength > queue->dataBufferSize) {
+                uint8_t *newBuffer = (uint8_t *)realloc(queue->data, queue->dataLength);
+                if(newBuffer) {
+                    queue->data = newBuffer;
+                    updateDataObjectSize(queue->object, (int)(queue->dataLength - queue->dataBufferSize));
+                    queue->dataBufferSize = queue->dataLength;
+                }
+                else {
+                    DBGPRINTF("ERROR: could not realloc buffer of TcpQueue, using old buffer\n");
+                    queue->dataLength = queue->dataBufferSize;
+                }
+            }
+
             memcpy(queue->data, pkt->payload, queue->dataLength);
         }
     }

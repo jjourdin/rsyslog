@@ -55,7 +55,9 @@ typedef struct TcpQueue_ {
     uint32_t seq;
     uint32_t ack;
     uint32_t dataLength;
+#define DEFAULT_QUEUE_BUFFER_SIZE   1500
     uint8_t *data;
+    uint32_t dataBufferSize;
     uint8_t used;
     struct TcpQueue_ *prev;
     struct TcpQueue_ *next;
