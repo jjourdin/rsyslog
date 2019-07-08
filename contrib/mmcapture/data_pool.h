@@ -61,6 +61,8 @@ typedef struct DataPool_ {
     struct DataObject_ *head;
     struct DataObject_ *tail;
     uint32_t listSize;
+    uint32_t availableElems;
+    uint32_t minAvailableElems;
     uint32_t totalAllocSize;
 
     void* (*objectConstructor)(void *);
@@ -92,7 +94,8 @@ uint32_t deleteDataObjectFromPool(DataObject *, DataPool *);
 void setObjectAvailable(DataObject *);
 void updateDataObjectSize(DataObject *, int);
 DataObject *getOrCreateAvailableObject(DataPool *);
-DataPool *createPool(char*, void* (*objectConstructor(void *)), void (*objectDestructor(void *)), void (*objectResetor(void *)));
+DataPool *createPool(char*, void* (*objectConstructor(void *)), void (*objectDestructor(void *)),
+        void (*objectResetor(void *)), uint32_t);
 void destroyPool(DataPool *);
 PoolStorage *initPoolStorage();
 void deletePoolStorage(PoolStorage *);

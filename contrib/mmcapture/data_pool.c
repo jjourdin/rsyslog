@@ -100,6 +100,7 @@ uint32_t deleteDataObjectFromPool(DataObject *object, DataPool *pool) {
         if(pool->head == object) pool->head = object->prev;
         if(pool->tail == object) pool->tail = object->next;
         pool->listSize--;
+        pool->availableElems--;
         pool->totalAllocSize -= object->size;
         dataFreed = object->size;
 
@@ -122,6 +123,7 @@ void setObjectAvailable(DataObject *object) {
     pthread_mutex_lock(&(object->mutex));
     object->state = AVAILABLE;
     object->pool->objectResetor(object->pObject);
+    object->pool->availableElems++;
     pthread_mutex_unlock(&(object->mutex));
 }
 
@@ -174,6 +176,7 @@ DataObject *getOrCreateAvailableObject(DataPool *pool) {
             addObjectToPool(pool, object);
             object->pool->totalAllocSize += object->size;
             object->pool->poolStorage->totalDataSize += object->size;
+            pool->availableElems++;
         }
         else {
             pthread_mutex_destroy(&(object->mutex));
@@ -186,13 +189,16 @@ DataObject *getOrCreateAvailableObject(DataPool *pool) {
 
     object->state = USED;
     object->stale = 0;
+    pool->availableElems--;
 
     pthread_mutex_unlock(&(pool->mutex));
 
     return object;
 }
 
-DataPool *createPool(char *poolName, void* (*objectConstructor(void *)), void (*objectDestructor(void *)), void (*objectResetor(void *))) {
+DataPool *createPool(char *poolName, void* (*objectConstructor(void *)),
+        void (*objectDestructor(void *)), void (*objectResetor(void *)),
+        uint32_t minAvailableElems) {
     DBGPRINTF("createPool\n");
 
     DataPool *newPool = malloc(sizeof(DataPool));
@@ -212,6 +218,8 @@ DataPool *createPool(char *poolName, void* (*objectConstructor(void *)), void (*
         newPool->objectDestructor = objectDestructor;
         newPool->objectResetor = objectResetor;
         newPool->totalAllocSize = sizeof(DataPool);
+        newPool->minAvailableElems = minAvailableElems;
+        newPool->availableElems = 0;
     }
     else {
         DBGPRINTF("ERROR: could not create new pool\n");

@@ -112,7 +112,7 @@ void streamInitConfig(StreamsCnf *conf) {
     DBGPRINTF("streamInitConfig\n");
     memset(conf, 0, sizeof(StreamsCnf));
 
-    conf->sbPool = createPool("streamBufferPool", streamBufferCreate, streamBufferDelete, streamBufferReset);
+    conf->sbPool = createPool("streamBufferPool", streamBufferCreate, streamBufferDelete, streamBufferReset, 20);
 
     streamsCnf = conf;
     return;

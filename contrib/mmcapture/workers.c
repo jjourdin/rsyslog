@@ -240,7 +240,7 @@ int workersInitConfig(WorkersCnf *conf) {
     conf->pDataListHead = NULL;
     conf->pDataListTail = NULL;
     conf->listSize = 0;
-    conf->workerDataPool = createPool("workersDataPool", createWorkerData, destroyWorkerData, resetWorkerData);
+    conf->workerDataPool = createPool("workersDataPool", createWorkerData, destroyWorkerData, resetWorkerData, 20);
     pthread_mutex_init(&(conf->mSignal), NULL);
     pthread_cond_init(&(conf->cSignal), NULL);
 

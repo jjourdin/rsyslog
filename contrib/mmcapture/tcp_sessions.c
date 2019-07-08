@@ -212,9 +212,9 @@ static inline void tcpSessionReset(void *sessionObject) {
 int initTCPPools() {
     DBGPRINTF("initTCPPools\n");
 
-    queuePool = createPool("tcpQueuePool", tcpQueueCreate, tcpQueueDelete, tcpQueueReset);
-    connPool = createPool("tcpConnectionPool", tcpConnectionCreate, tcpConnectionDelete, tcpConnectionReset);
-    sessPool = createPool("tcpSessionPool", tcpSessionCreate, tcpSessionDelete, tcpSessionReset);
+    queuePool = createPool("tcpQueuePool", tcpQueueCreate, tcpQueueDelete, tcpQueueReset, 40);
+    connPool = createPool("tcpConnectionPool", tcpConnectionCreate, tcpConnectionDelete, tcpConnectionReset, 40);
+    sessPool = createPool("tcpSessionPool", tcpSessionCreate, tcpSessionDelete, tcpSessionReset, 20);
     return !queuePool || !connPool || !sessPool;
 }
 

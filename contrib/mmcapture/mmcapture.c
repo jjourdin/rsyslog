@@ -277,7 +277,7 @@ void *memoryManagerDoWork(void *pData) {
                 else usedAmount++;
 
                 if(delete->state != USED && delete->stale &&
-                    pool->listSize > params->instData->workersCnf->maxWorkers) {
+                    pool->availableElems > pool->minAvailableElems) {
                     totalMemFreed += deleteDataObjectFromPool(delete, pool);
                     DBGPRINTF("memory manager: deleting object in '%s', "
                               "new listSize: %u\n", pool->poolName, pool->listSize);
@@ -289,8 +289,9 @@ void *memoryManagerDoWork(void *pData) {
                 pthread_mutex_unlock(&(delete->mutex));
             }
             pthread_mutex_unlock(&(pool->mutex));
-            DBGPRINTF("memory manager: %u free, %u used in '%s', "
-                      "for %u total memory\n", freeAmount, usedAmount, pool->poolName, pool->totalAllocSize);
+            DBGPRINTF("memory manager: %u free, %u total in '%s', "
+                      "for %u total memory\n", pool->availableElems, pool->listSize,
+                      pool->poolName, pool->totalAllocSize);
         }
 
         DBGPRINTF("memory manager: cleanup finished, memory freed: %u,"
@@ -315,6 +316,12 @@ void *memoryManagerDoWork(void *pData) {
                            session->sCon->state > TCP_ESTABLISHED &&
                            (currentTime - flow->lastPacketTime) > 10) {
                             DBGPRINTF("memory manager: found closed session, freeing\n");
+                            pthread_mutex_lock(&(flow->mFlow));
+                            setObjectAvailable(sessObject);
+                            pthread_mutex_unlock(&(flow->mFlow));
+                        }
+                        else if((currentTime - flow->lastPacketTime) > 300) {
+                            DBGPRINTF("memory manager: found idle session, freeing\n");
                             pthread_mutex_lock(&(flow->mFlow));
                             setObjectAvailable(sessObject);
                             pthread_mutex_unlock(&(flow->mFlow));
@@ -418,7 +425,7 @@ CODESTARTcreateInstance
     pData->globalYaraCnf = calloc(1, sizeof(YaraCnf));
     pData->workersCnf = calloc(1, sizeof(WorkersCnf));
     pData->logFile = createFileStruct();
-    pData->workerDataContextPool = createPool("workerDataContextPool", createWorkerDataContext, destroyWorkerDataContext, resetWorkerDataContext);
+    pData->workerDataContextPool = createPool("workerDataContextPool", createWorkerDataContext, destroyWorkerDataContext, resetWorkerDataContext, 20);
     initTCPPools();
     pData->memoryManager = initMemoryManager();
 ENDcreateInstance
