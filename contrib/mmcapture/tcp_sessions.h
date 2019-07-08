@@ -90,6 +90,7 @@ typedef struct TcpConnection_{
     StreamBuffer *streamBuffer;
     TcpQueue *queueHead;
     TcpQueue *queueTail;
+    uint32_t queueSize;
 
     DataObject *object;
 } TcpConnection;

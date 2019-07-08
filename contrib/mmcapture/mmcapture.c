@@ -193,9 +193,11 @@ void *workerDoWork(void *pData) {
             else {
                 sb = session->sCon->streamBuffer;
             }
+            pthread_mutex_lock(&(sb->mutex));
             pthread_mutex_unlock(&(pkt->flow->mFlow));
 
             yaraMeta = yaraScan(pkt->payload, pkt->payloadLen, sb);
+            pthread_mutex_unlock(&(sb->mutex));
         }
         else if(context->instanceData->globalYaraCnf->scanType == SCAN_PACKET_ONLY ||
                 tcpStatus == -1){
@@ -228,9 +230,7 @@ void *workerDoWork(void *pData) {
         }
     }
 
-    pthread_mutex_lock(&(context->object->mutex));
-    context->object->state = AVAILABLE;
-    pthread_mutex_unlock(&(context->object->mutex));
+    setObjectAvailable(context->object);
     freePacket(pkt);
 
     return NULL;
@@ -244,7 +244,7 @@ typedef struct MemManagerParams_ {
 
 void *memoryManagerDoWork(void *pData) {
     MemManagerParams *params = (MemManagerParams *)pData;
-    DBGPRINTF("memory manager started\n");
+    DBGPRINTF("memory manager: started\n");
 
     struct timespec waitTime;
 
@@ -256,13 +256,14 @@ void *memoryManagerDoWork(void *pData) {
         pthread_cond_timedwait(&(params->self->conf->cSignal), &(params->self->conf->mSignal), &waitTime);
 
         if(params->self->sigStop) {
-            DBGPRINTF("memory manager closing\n");
+            DBGPRINTF("memory manager: closing\n");
             pthread_mutex_unlock(&(params->self->conf->mSignal));
             pthread_exit(0);
         }
 
-        DBGPRINTF("memory manager launching cleanup\n");
+        DBGPRINTF("memory manager: launching cleanup\n");
         DataPool *pool;
+        uint32_t totalMemFreed = 0;
         for(pool = poolStorage->tail; pool != NULL; pool = pool->next) {
             pthread_mutex_lock(&(pool->mutex));
             uint32_t freeAmount = 0, usedAmount = 0;
@@ -277,8 +278,8 @@ void *memoryManagerDoWork(void *pData) {
 
                 if(delete->state != USED && delete->stale &&
                     pool->listSize > params->instData->workersCnf->maxWorkers) {
-                    deleteDataObjectFromPool(delete, pool);
-                    DBGPRINTF("memory manager deleting object in '%s', "
+                    totalMemFreed += deleteDataObjectFromPool(delete, pool);
+                    DBGPRINTF("memory manager: deleting object in '%s', "
                               "new listSize: %u\n", pool->poolName, pool->listSize);
                     continue;
                 }
@@ -292,7 +293,39 @@ void *memoryManagerDoWork(void *pData) {
                       "for %u total memory\n", freeAmount, usedAmount, pool->poolName, pool->totalAllocSize);
         }
 
-        DBGPRINTF("memory manager cleanup finished, total memory used: %u\n", poolStorage->totalDataSize);
+        DBGPRINTF("memory manager: cleanup finished, memory freed: %u,"
+                  " total memory used: %u\n", totalMemFreed, poolStorage->totalDataSize);
+
+        if(params->instData->globalYaraCnf->scanType == SCAN_STREAM) {
+            DBGPRINTF("memory manager: starting TCP session cleanup\n");
+
+            DataObject *sessObject;
+            TcpSession *session;
+            Flow *flow;
+            time_t currentTime = datetime.GetTime(NULL);
+
+            pthread_mutex_lock(&(sessPool->mutex));
+            for(sessObject = sessPool->tail; sessObject != NULL; sessObject = sessObject->next) {
+                if(sessObject->state == AVAILABLE) continue;
+                session = sessObject->pObject;
+                if(session) {
+                    flow = session->flow;
+                    if(flow) {
+                        if(session->cCon->state > TCP_ESTABLISHED &&
+                           session->sCon->state > TCP_ESTABLISHED &&
+                           (currentTime - flow->lastPacketTime) > 10) {
+                            DBGPRINTF("memory manager: found closed session, freeing\n");
+                            pthread_mutex_lock(&(flow->mFlow));
+                            setObjectAvailable(sessObject);
+                            pthread_mutex_unlock(&(flow->mFlow));
+                        }
+                    }
+                }
+            }
+
+            pthread_mutex_unlock(&(sessPool->mutex));
+            DBGPRINTF("memory manager: finished TCP session cleanup\n");
+        }
         pthread_mutex_unlock(&(params->self->conf->mSignal));
     }
 }
@@ -578,9 +611,7 @@ CODESTARTdoAction
     else {
         msgDestruct(&(context->pMsg));
         context->pMsg = NULL;
-        pthread_mutex_lock(&(context->object->mutex));
-        context->object->state = AVAILABLE;
-        pthread_mutex_unlock(&(context->object->mutex));
+        setObjectAvailable(context->object);
         DBGPRINTF("WARNING: could not get object to handle new msg, dropping\n");
         return 0;
     }

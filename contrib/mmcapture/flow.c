@@ -235,6 +235,7 @@ Flow *createNewFlowFromPacket(Packet *packet) {
         }
         flow->flowHash = packet->hash;
         flow->initPacketTime = packet->enterTime;
+        flow->lastPacketTime = packet->enterTime;
         flow->toDstPktCnt = 1;
         flow->toDstByteCnt = packet->payloadLen;
         flow->toSrcPktCnt = 0;

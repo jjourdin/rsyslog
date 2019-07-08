@@ -105,6 +105,14 @@ static inline void tcpConnectionDelete(void *connObject) {
 
     if(connObject) {
         TcpConnection *conn = (TcpConnection *)connObject;
+        setObjectAvailable(conn->streamBuffer->object);
+        TcpQueue *current, *queue = conn->queueTail;
+        while(queue) {
+            current = queue;
+            queue = queue->next;
+            setObjectAvailable(current->object);
+        }
+
         free(conn);
     }
 
@@ -122,18 +130,14 @@ static inline void tcpConnectionReset(void *connObject) {
         conn->nextSeq = 0;
         conn->lastAck = 0;
 
-        pthread_mutex_lock(&(conn->streamBuffer->object->mutex));
-        conn->streamBuffer->object->state = AVAILABLE;
-        pthread_mutex_lock(&(conn->streamBuffer->object->mutex));
+        TcpQueue *queue = conn->queueTail, *current;
 
-        conn->streamBuffer = NULL;
-        TcpQueue *queue = conn->queueTail;
-
-        for(; queue != NULL; queue = queue->next) {
-            pthread_mutex_lock(&(queue->object->mutex));
-            queue->object->state = AVAILABLE;
-            pthread_mutex_unlock(&(queue->object->mutex));
+        while(queue) {
+            current = queue;
+            queue = queue->next;
+            setObjectAvailable(current->object);
         }
+        conn->queueSize = 0;
 
         conn->queueHead = NULL;
         conn->queueTail = NULL;
@@ -183,6 +187,8 @@ static inline void tcpSessionDelete(void *sessionObject) {
 
     if(sessionObject) {
         TcpSession *session = (TcpSession *)sessionObject;
+        setObjectAvailable(session->cCon->object);
+        setObjectAvailable(session->sCon->object);
         free(session);
     }
 
@@ -194,15 +200,10 @@ static inline void tcpSessionReset(void *sessionObject) {
 
     if(sessionObject) {
         TcpSession *session = (TcpSession *)sessionObject;
-        pthread_mutex_lock(&(session->sCon->object->mutex));
-        pthread_mutex_lock(&(session->cCon->object->mutex));
-        session->sCon->object->state = AVAILABLE;
-        session->cCon->object->state = AVAILABLE;
-        pthread_mutex_unlock(&(session->sCon->object->mutex));
-        pthread_mutex_unlock(&(session->cCon->object->mutex));
+        tcpConnectionReset(session->sCon);
+        tcpConnectionReset(session->cCon);
 
-        session->sCon = NULL;
-        session->cCon = NULL;
+        session->flow->protoCtx = NULL;
         session->flow = NULL;
     }
     return;
@@ -448,6 +449,7 @@ static inline void tcpConnectionInsertToQueue(TcpConnection *connection, TcpQueu
             connection->queueTail = newElem;
         }
         if(!connection->queueHead) connection->queueHead = newElem;
+        connection->queueSize++;
     }
     else {
         DBGPRINTF("tcpConnectionInsertToQueue: [ERROR] connection or newElem are NULL\n");
@@ -480,6 +482,7 @@ static inline int tcpQueueRemoveFromConnection(TcpConnection *connection, TcpQue
 
         if(connection->queueHead == queue) connection->queueHead = queue->prev;
         if(connection->queueTail == queue) connection->queueTail = queue->next;
+        connection->queueSize--;
         return 0;
     }
     return 1;
@@ -546,9 +549,7 @@ int handleTcpFromPacket(Packet *pkt) {
                         ret = tcpConnectionsUpdateFromQueueElem(srcCon, dstCon, tcpQueue);
                         tcpQueueRemoveFromConnection(srcCon, tcpQueue);
 
-                        pthread_mutex_lock(&(tcpQueue->object->mutex));
-                        tcpQueue->object->state = AVAILABLE;
-                        pthread_mutex_unlock(&(tcpQueue->object->mutex));
+                        setObjectAvailable(tcpQueue->object);
 
                         if(ret) return 1;
 

@@ -90,6 +90,8 @@ void streamBufferReset(void *sbObject) {
 
     if(sbObject) {
         StreamBuffer *sb = (StreamBuffer *)sbObject;
+        pthread_mutex_lock(&(sb->mutex));
+
         sb->bufferFill = 0;
         sb->streamOffset = 0;
         if(sb->ruleList) {
@@ -100,6 +102,8 @@ void streamBufferReset(void *sbObject) {
             deleteFileStruct(sb->bufferDump);
             sb->bufferDump = NULL;
         }
+
+        pthread_mutex_unlock(&(sb->mutex));
     }
     return;
 }

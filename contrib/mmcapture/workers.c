@@ -109,9 +109,7 @@ static inline void *workerWaitWork(void *pData) {
         if(work) {
             DBGPRINTF("WORKER [%ld] got work to do\n", self->tid);
             self->conf->workFunction(work->pData);
-            pthread_mutex_lock(&(work->object->mutex));
-            work->object->state = AVAILABLE;
-            pthread_mutex_unlock(&(work->object->mutex));
+            setObjectAvailable(work->object);
         }
     }
 }

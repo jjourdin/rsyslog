@@ -87,8 +87,9 @@ static inline void addPoolToStorage(DataPool *pool) {
     return;
 }
 
-void deleteDataObjectFromPool(DataObject *object, DataPool *pool) {
+uint32_t deleteDataObjectFromPool(DataObject *object, DataPool *pool) {
     DBGPRINTF("deleteDataObjectFromPool\n");
+    uint32_t dataFreed = 0;
 
     if(pool && object && object->state != USED) {
 
@@ -100,6 +101,7 @@ void deleteDataObjectFromPool(DataObject *object, DataPool *pool) {
         if(pool->tail == object) pool->tail = object->next;
         pool->listSize--;
         pool->totalAllocSize -= object->size;
+        dataFreed = object->size;
 
         pthread_mutex_lock(&(pool->poolStorage->mutex));
         pool->poolStorage->totalDataSize -= object->size;
@@ -112,7 +114,15 @@ void deleteDataObjectFromPool(DataObject *object, DataPool *pool) {
         pthread_mutex_destroy(&(object->mutex));
         free(object);
     }
-    return;
+    return dataFreed;
+}
+
+void setObjectAvailable(DataObject *object) {
+    DBGPRINTF("setObjectAvailable\n");
+    pthread_mutex_lock(&(object->mutex));
+    object->state = AVAILABLE;
+    object->pool->objectResetor(object->pObject);
+    pthread_mutex_unlock(&(object->mutex));
 }
 
 void updateDataObjectSize(DataObject *object, int diffSize) {
@@ -172,10 +182,6 @@ DataObject *getOrCreateAvailableObject(DataPool *pool) {
             return NULL;
         }
         DBGPRINTF("getOrCreateAvailableObject in pool '%s', new pool size: %u\n", pool->poolName, pool->listSize);
-    }
-    else {
-        DBGPRINTF("getOrCreateAvailableObject in pool '%s', found object, resetting\n", pool->poolName);
-        pool->objectResetor(object->pObject);
     }
 
     object->state = USED;

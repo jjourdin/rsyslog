@@ -88,7 +88,8 @@ typedef struct PoolStorage_ {
 #define DEFAULT_MAX_POOL_STORAGE_SIZE   1024
 extern PoolStorage *poolStorage;
 
-void deleteDataObjectFromPool(DataObject *, DataPool *);
+uint32_t deleteDataObjectFromPool(DataObject *, DataPool *);
+void setObjectAvailable(DataObject *);
 void updateDataObjectSize(DataObject *, int);
 DataObject *getOrCreateAvailableObject(DataPool *);
 DataPool *createPool(char*, void* (*objectConstructor(void *)), void (*objectDestructor(void *)), void (*objectResetor(void *)));
