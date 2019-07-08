@@ -170,12 +170,6 @@ void *workerDoWork(void *pData) {
             tcpStatus = handleTcpFromPacket(pkt);
             pthread_mutex_unlock(&(pkt->flow->mFlow));
 
-//            if(tcpStatus == 1) {
-//                /* session is now closed */
-//                TcpSession *session = (TcpSession *) pkt->flow->protoCtx;
-//                tcpSessionDelete(session);
-//                pkt->flow->protoCtx = NULL;
-//            }
         }
     }
 
@@ -258,6 +252,7 @@ void *memoryManagerDoWork(void *pData) {
         if(params->self->sigStop) {
             DBGPRINTF("memory manager: closing\n");
             pthread_mutex_unlock(&(params->self->conf->mSignal));
+            free(params);
             pthread_exit(0);
         }
 
@@ -384,6 +379,21 @@ void startMemoryManager(Worker *memManager, instanceData *instData) {
     return -1;
 }
 
+void stopMemoryManager(Worker *memManager) {
+    if(memManager) {
+        pthread_mutex_lock(&(memManager->conf->mSignal));
+        memManager->sigStop = 1;
+        pthread_cond_signal(&(memManager->conf->cSignal));
+        pthread_mutex_unlock(&(memManager->conf->mSignal));
+
+        pthread_join(memManager->thread, NULL);
+
+        free(memManager->conf);
+        free(memManager);
+        return;
+    }
+}
+
 /* init instance, set parameters */
 
 BEGINbeginCnfLoad
@@ -438,6 +448,7 @@ ENDcreateWrkrInstance
 BEGINfreeInstance
     DBGPRINTF("entering freeInstance\n");
 CODESTARTfreeInstance
+    stopMemoryManager(pData->memoryManager);
     workersDeleteConfig(pData->workersCnf);
     streamDeleteConfig(pData->globalStreamsCnf);
     flowDeleteConfig(pData->globalFlowCnf);
