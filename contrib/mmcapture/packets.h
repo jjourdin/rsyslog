@@ -59,7 +59,6 @@ typedef struct Packet_ {
     struct IPV6Hdr_ *ipv6h;
     struct IPV4Hdr_ *ipv4h;
     struct TCPHdr_ *tcph;
-    struct SMBHdr_ *smbh;
 
     uint8_t *payload;
     uint16_t payloadLen;

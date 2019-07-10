@@ -39,8 +39,6 @@
 #include "packets.h"
 #include "rsconf.h"
 
-#define SMB_PORT1 139
-#define SMB_PORT2 445
 #define HTTP_PORT 80
 #define FTP_PORT 21
 #define FTP_PORT_DATA 20
@@ -72,23 +70,10 @@ typedef struct IPV6Hdr_ {
     uint8_t proto;
 } IPV6Hdr;
 
-typedef struct SMBHdr_ {
-    uint32_t version;
-    uint32_t ntStatus;
-    uint16_t opcode;
-    char flags[10];
-    uint64_t seqNumber;
-    uint32_t procID;
-    uint32_t treeID;
-    uint64_t userID;
-} SMBHdr;
-
 struct Packet_ *getImpcapData(smsg_t *);
 char *ImpcapDataDecode(char *, uint32_t );
 TCPHdr *getTcpHeader(struct json_object *);
 IPV4Hdr *getIpv4Header(struct json_object *);
 IPV6Hdr *getIpv6Header(struct json_object *);
-SMBHdr *getSmbHeader(struct json_object *);
-
 
 #endif /* EXTRACT_IMPCAP_H */

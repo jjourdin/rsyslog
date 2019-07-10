@@ -65,17 +65,6 @@ void printPacketInfo(Packet *pkt) {
         DBGPRINTF("tcph->flags: %s\n", pkt->tcph->flags);
     }
 
-    if(pkt->smbh) {
-        DBGPRINTF("smbh->version: %u\n", pkt->smbh->version);
-        DBGPRINTF("smbh->ntstatus: %u\n", pkt->smbh->ntStatus);
-        DBGPRINTF("smbh->opcode: %d\n", pkt->smbh->opcode);
-        DBGPRINTF("smbh->flags: %s\n", pkt->smbh->flags);
-        DBGPRINTF("smbh->seqNumber: %lu\n", pkt->smbh->seqNumber);
-        DBGPRINTF("smbh->procID: %u\n", pkt->smbh->procID);
-        DBGPRINTF("smbh->treeID: %u\n", pkt->smbh->treeID);
-        DBGPRINTF("smbh->userID: %lu\n", pkt->smbh->userID);
-    }
-
     DBGPRINTF("pkt->src: %0X %0X %0X %0X\n",
             pkt->src.addr_data32[0],
             pkt->src.addr_data32[1],
@@ -108,7 +97,6 @@ void freePacket(Packet *pkt) {
         if(pkt->ipv4h)      free(pkt->ipv4h);
         if(pkt->ipv6h)      free(pkt->ipv6h);
         if(pkt->tcph)       free(pkt->tcph);
-        if(pkt->smbh)       free(pkt->smbh);
         if(pkt->payload)    free(pkt->payload);
         free(pkt);
     }

@@ -62,14 +62,6 @@ Packet *getImpcapData(smsg_t *pMsg) {
 
             if(pkt->proto == IPPROTO_TCP) {
                 pkt->tcph = getTcpHeader(pJson);
-                if(pkt->tcph != NULL) {
-                    if(     pkt->tcph->dport == SMB_PORT1 ||
-                            pkt->tcph->sport == SMB_PORT1 ||
-                            pkt->tcph->dport == SMB_PORT2 ||
-                            pkt->tcph->sport == SMB_PORT2) {
-                        pkt->smbh = getSmbHeader(pJson);
-                    }
-                }
             }
         }
 
@@ -234,45 +226,4 @@ IPV4Hdr *getIpv4Header(struct json_object *pJson) {
     }
 
     return ipv4h;
-}
-
-SMBHdr *getSmbHeader(struct json_object *pJson) {
-    DBGPRINTF("getting SMB header\n");
-    struct json_object *obj = NULL;
-    SMBHdr *smbh = malloc(sizeof(SMBHdr));
-    memset(smbh, 0, sizeof(SMBHdr));
-
-    if (fjson_object_object_get_ex(pJson, "SMB_version", &obj)) {
-        smbh->version = fjson_object_get_int(obj);
-    }
-
-    if (fjson_object_object_get_ex(pJson, "SMB_NTstatus", &obj)) {
-        smbh->ntStatus = fjson_object_get_int64(obj);
-    }
-
-    if (fjson_object_object_get_ex(pJson, "SMB_operation", &obj)) {
-        smbh->opcode = fjson_object_get_int(obj);
-    }
-
-    if (fjson_object_object_get_ex(pJson, "SMB_flags", &obj)) {
-        strncpy(smbh->flags, fjson_object_get_string(obj), 10);
-    }
-
-    if (fjson_object_object_get_ex(pJson, "SMB_seqNumber", &obj)) {
-        smbh->seqNumber = fjson_object_get_int64(obj);
-    }
-
-    if (fjson_object_object_get_ex(pJson, "SMB_processID", &obj)) {
-        smbh->procID= fjson_object_get_int64(obj);
-    }
-
-    if (fjson_object_object_get_ex(pJson, "SMB_treeID", &obj)) {
-        smbh->treeID = fjson_object_get_int64(obj);
-    }
-
-    if (fjson_object_object_get_ex(pJson, "SMB_userID", &obj)) {
-        smbh->userID = fjson_object_get_int64(obj);
-    }
-
-    return smbh;
 }
