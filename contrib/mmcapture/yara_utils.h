@@ -47,13 +47,16 @@ typedef struct YaraCnf_ {
 
     uint8_t scanType;
 #define SCAN_TYPE_DEFAULT   0
-#define SCAN_PACKET_ONLY    0
-#define SCAN_STREAM         1
+#define SCAN_NONE           0
+#define SCAN_PACKET_ONLY    1
+#define SCAN_STREAM         2
 
     uint32_t scanMaxSize;
 #define SCAN_SIZE_DEFAULT   4096
     YR_COMPILER *compiler;
     YR_RULES    *rules;
+
+    char *ruleFilename;
 } YaraCnf;
 
 YaraCnf *globalYaraCnf;

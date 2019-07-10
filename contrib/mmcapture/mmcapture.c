@@ -367,16 +367,16 @@ void startMemoryManager(Worker *memManager, instanceData *instData) {
         if(pthread_create(&(memManager->thread), &attr, memoryManagerDoWork, (void *)params) != 0) {
             memManager->thread = NULL;
             pthread_attr_destroy(&attr);
-            return -1;
+            return;
         }
 
         pthread_attr_destroy(&attr);
-        return 0;
+        return;
     }
     else {
         DBGPRINTF("cannot start memory manager: object given is not initialised\n");
     }
-    return -1;
+    return;
 }
 
 void stopMemoryManager(Worker *memManager) {
@@ -494,14 +494,13 @@ CODE_STD_STRING_REQUESTnewActInst(1)
             DBGPRINTF("maxConnections set to %u\n", globalFlowCnf->maxFlow);
         }
         else if(!strcmp(actpblk.descr[i].name, "yaraRuleFile")) {
-            char *yaraRuleFilename = es_str2cstr(pvals[i].val.d.estr, NULL);
-            DBGPRINTF("adding file '%s' to yara compilation\n", yaraRuleFilename);
-            FILE *yaraRuleFile = fopen(yaraRuleFilename, "r");
+            pData->globalYaraCnf->ruleFilename = es_str2cstr(pvals[i].val.d.estr, NULL);
+            DBGPRINTF("adding file '%s' to yara compilation\n", pData->globalYaraCnf->ruleFilename);
+            FILE *yaraRuleFile = fopen(pData->globalYaraCnf->ruleFilename, "r");
 
             if(yaraRuleFile) {
-                yaraAddRuleFile(yaraRuleFile, NULL, yaraRuleFilename);
+                yaraAddRuleFile(yaraRuleFile, NULL, pData->globalYaraCnf->ruleFilename);
                 fclose(yaraRuleFile);
-                free(yaraRuleFilename);
 
                 if(yaraCompileRules()) {
                     DBGPRINTF("error while compiling yara rules\n");
@@ -538,7 +537,6 @@ CODE_STD_STRING_REQUESTnewActInst(1)
         }
         else if(!strcmp(actpblk.descr[i].name, "streamStoreFolder")) {
             pData->globalStreamsCnf->streamStoreFolder = es_str2cstr(pvals[i].val.d.estr, NULL);
-
             DBGPRINTF("streamStoreFolder set to '%s'\n", pData->globalStreamsCnf->streamStoreFolder);
         }
         else if(!strcmp(actpblk.descr[i].name, "logFile")) {
@@ -580,6 +578,17 @@ CODE_STD_STRING_REQUESTnewActInst(1)
         }
     }
 
+    if(!pData->globalStreamsCnf->streamStoreFolder && pData->globalYaraCnf->scanType == SCAN_NONE) {
+        LogError(0, RS_RET_MISSING_CNFPARAMS, "mmcapture: at least 'streamStoreFolder' or 'yaraScanType' are required to "
+                                       "launch module\n");
+        ABORT_FINALIZE(RS_RET_MISSING_CNFPARAMS);
+    }
+
+    if(pData->globalYaraCnf->scanType && !pData->globalYaraCnf->ruleFilename) {
+        LogError(0, RS_RET_MISSING_CNFPARAMS, "mmcapture: if 'yaraScanType' is provided, rules must be added with the "
+                                              "'yaraRuleFile' parameter\n");
+        ABORT_FINALIZE(RS_RET_MISSING_CNFPARAMS);
+    }
 
 CODE_STD_FINALIZERnewActInst
     cnfparamvalsDestruct(pvals, &actpblk);

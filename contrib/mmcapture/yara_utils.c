@@ -95,6 +95,7 @@ int yaraInitConfig(YaraCnf *conf) {
     conf->scanType = SCAN_TYPE_DEFAULT;
 
     conf->status |= YARA_CNF_INIT;
+    conf->ruleFilename = NULL;
     globalYaraCnf = conf;
     return 0;
 }
