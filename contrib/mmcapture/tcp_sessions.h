@@ -41,6 +41,9 @@
 #include "file_utils.h"
 #include "data_pool.h"
 
+extern intctr_t ctrSessions;
+extern pthread_mutex_t mutCtrSessions;
+
 #define MAX_TCP_SESSIONS 512
 #define TCP_PROTO 6
 

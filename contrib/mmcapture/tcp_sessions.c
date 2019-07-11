@@ -28,6 +28,8 @@
 
 #include "tcp_sessions.h"
 
+STATSCOUNTER_DEF(ctrSessions, mutCtrSessions)
+
 DataPool *queuePool;
 DataPool *connPool;
 DataPool *sessPool;
@@ -334,6 +336,7 @@ int tcpSessionInitFromPacket(TcpSession *tcpSession, Packet *pkt) {
                 srcCon->nextSeq = srcCon->initSeq + dataLength;
             }
 
+            STATSCOUNTER_INC(ctrSessions, mutCtrSessions);
             return 0;
         }
     }
@@ -420,6 +423,7 @@ int tcpConnectionsUpdateFromQueueElem(TcpConnection *srcCon, TcpConnection *dstC
         srcCon->lastAck = queue->ack;
 
         if(srcCon->state >= TCP_CLOSING && dstCon->state >= TCP_CLOSING) {
+            STATSCOUNTER_DEC(ctrSessions, mutCtrSessions);
             return 1;
         }
 

@@ -26,6 +26,8 @@
 
 #include "stream_buffer.h"
 
+STATSCOUNTER_DEF(ctrFilesDumped, mutCtrFilesDumped)
+
 StreamsCnf *streamsCnf;
 
 static inline int initBuffer(StreamBuffer *sb) {
@@ -133,6 +135,8 @@ int linkStreamBufferToDumpFile(StreamBuffer *sb, char *filename) {
         DBGPRINTF("linking file '%s' to stream buffer\n", filename);
         FILE *opened = openFile(streamsCnf->streamStoreFolder, filename);
         if(!opened) return -1;
+
+        STATSCOUNTER_INC(ctrFilesDumped, mutCtrFilesDumped);
 
         sb->bufferDump = createFileStruct();
 

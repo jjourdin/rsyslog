@@ -46,6 +46,7 @@
 #include "rainerscript.h"
 #include "rsconf.h"
 #include "datetime.h"
+#include "statsobj.h"
 
 #include "packets.h"
 #include "file_utils.h"
@@ -63,11 +64,20 @@ MODULE_CNFNAME("mmcapture")
 /* static data */
 DEF_OMOD_STATIC_DATA
 DEFobjCurrIf(datetime)
+DEFobjCurrIf(statsobj)
 
 #define IMPCAP_METADATA "!impcap"
 #define IMPCAP_DATA     "!data"
 
 #define YARA_METADATA   "!yara"
+
+/* statistics */
+statsobj_t *stats;
+
+STATSCOUNTER_DEF(ctrPackets, mutCtrPackets)
+STATSCOUNTER_DEF(ctrMatches, mutCtrMatches)
+STATSCOUNTER_DEF(ctrMemUsage, mutCtrMemUsage)
+STATSCOUNTER_DEF(ctrQueueSize, mutCtrQueueSize)
 
 /* conf structures */
 
@@ -151,6 +161,7 @@ void resetWorkerDataContext(void *wdcObject) {
 void *workerDoWork(void *pData) {
     WorkerDataContext *context = (WorkerDataContext *)pData;
     int tcpStatus;
+    STATSCOUNTER_DEC(ctrQueueSize, mutCtrQueueSize);
 
     Packet *pkt = getImpcapData(context->pMsg);
     msgDestruct(&(context->pMsg));
@@ -199,6 +210,7 @@ void *workerDoWork(void *pData) {
         }
 
         if(yaraMeta) {
+            STATSCOUNTER_INC(ctrMatches, mutCtrMatches);
             if(context->instanceData->logFile->pFile) {
                 struct fjson_object *jsonLine = fjson_object_new_object();
                 struct syslogTime detectionTime;
@@ -291,6 +303,9 @@ void *memoryManagerDoWork(void *pData) {
 
         DBGPRINTF("memory manager: cleanup finished, memory freed: %u,"
                   " total memory used: %u\n", totalMemFreed, poolStorage->totalDataSize);
+
+        uint32_t ratio = (unsigned long int)((float)poolStorage->totalDataSize/(float)poolStorage->maxDataSize*100);
+        STATSCOUNTER_ADD(ctrMemUsage, mutCtrMemUsage, -ctrMemUsage+ratio);
 
         if(params->instData->globalYaraCnf->scanType == SCAN_STREAM) {
             DBGPRINTF("memory manager: starting TCP session cleanup\n");
@@ -646,6 +661,8 @@ CODESTARTdoAction
     work->pData = (void *)context;
     work->next = NULL;
     addWork(work, pData->workersCnf);
+    STATSCOUNTER_INC(ctrPackets, mutCtrPackets);
+    STATSCOUNTER_INC(ctrQueueSize, mutCtrQueueSize);
 
 ENDdoAction
 
@@ -675,6 +692,8 @@ ENDdbgPrintInstInfo
 BEGINmodExit
 CODESTARTmodExit
     DBGPRINTF("mmcapture: exit\n");
+    statsobj.Destruct(&stats);
+    objRelease(statsobj, CORE_COMPONENT);
     objRelease(datetime, CORE_COMPONENT);
 ENDmodExit
 
@@ -692,5 +711,36 @@ BEGINmodInit()
 CODESTARTmodInit
     DBGPRINTF("mmcapture: init\n");
     *ipIFVersProvided = CURR_MOD_IF_VERSION;
+    CHKiRet(objUse(statsobj, CORE_COMPONENT));
     CHKiRet(objUse(datetime, CORE_COMPONENT));
+
+    CHKiRet(statsobj.Construct(&stats));
+    CHKiRet(statsobj.SetName(stats, UCHAR_CONSTANT("mmcapture")));
+    CHKiRet(statsobj.SetOrigin(stats, UCHAR_CONSTANT("mmcapture")));
+    STATSCOUNTER_INIT(ctrPackets, mutCtrPackets);
+    CHKiRet(statsobj.AddCounter(stats, UCHAR_CONSTANT("packetsProcessed"),
+        ctrType_IntCtr, CTR_FLAG_RESETTABLE, &ctrPackets));
+
+    STATSCOUNTER_INIT(ctrSessions, mutCtrSessions);
+    CHKiRet(statsobj.AddCounter(stats, UCHAR_CONSTANT("openSessions"),
+        ctrType_IntCtr, CTR_FLAG_RESETTABLE, &ctrSessions));
+
+    STATSCOUNTER_INIT(ctrMatches, mutCtrMatches);
+    CHKiRet(statsobj.AddCounter(stats, UCHAR_CONSTANT("yaraMatches"),
+        ctrType_IntCtr, CTR_FLAG_RESETTABLE, &ctrMatches));
+
+    STATSCOUNTER_INIT(ctrQueueSize, mutCtrQueueSize);
+    CHKiRet(statsobj.AddCounter(stats, UCHAR_CONSTANT("queueSize"),
+        ctrType_IntCtr, CTR_FLAG_RESETTABLE, &ctrQueueSize));
+
+    STATSCOUNTER_INIT(ctrMemUsage, mutCtrMemUsage);
+    CHKiRet(statsobj.AddCounter(stats, UCHAR_CONSTANT("memPoolPercentUsed"),
+        ctrType_IntCtr, CTR_FLAG_RESETTABLE, &ctrMemUsage));
+
+    STATSCOUNTER_INIT(ctrFilesDumped, mutCtrFileDumped);
+    CHKiRet(statsobj.AddCounter(stats, UCHAR_CONSTANT("filesCreated"),
+        ctrType_IntCtr, CTR_FLAG_RESETTABLE, &ctrFilesDumped));
+
+    CHKiRet(statsobj.ConstructFinalize(stats));
+
 ENDmodInit

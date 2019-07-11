@@ -34,6 +34,10 @@
 #include "rsyslog.h"
 #include "file_utils.h"
 #include "data_pool.h"
+#include "statsobj.h"
+
+extern intctr_t ctrFilesDumped;
+extern pthread_mutex_t mutCtrFilesDumped;
 
 #define DEFAULT_BUFF_START_SIZE     4096
 #define BUFF_ADD_BLOCK_SIZE         4096
