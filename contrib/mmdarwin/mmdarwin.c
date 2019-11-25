@@ -44,6 +44,7 @@
 
 #define JSON_IPLOOKUP_NAME "!srcip"
 #define JSON_LOOKUP_NAME "!mmdarwin"
+#define JSON_DARWIN_ID "darwin_id"
 #define INVLD_SOCK -1
 #define INITIAL_BUFFER_SIZE 32
 #define BUFFER_DEFAULT_MAX_SIZE 65536
@@ -143,6 +144,7 @@ static rsRetVal doTryResume(wrkrInstanceData_t *pWrkrData);
 static rsRetVal sendMsg(wrkrInstanceData_t *pWrkrData, void *msg, size_t len);
 static rsRetVal receiveMsg(wrkrInstanceData_t *pWrkrData, void *response, size_t len);
 
+struct json_object* get_uuid_object(smsg_t *const pMsg);
 int get_field(smsg_t *const pMsg, const char *pFieldName, char **ppRetString);
 int expand_buffer(dyn_buffer *pBody, size_t new_size);
 int add_field_to_body(dyn_buffer *pBody, const char *field, size_t size);
@@ -471,6 +473,42 @@ int end_body(dyn_buffer *pBody)
 	pBody->buffer[pBody->bufferMsgSize++] = ']';
 	pBody->buffer[pBody->bufferMsgSize++] = '\0';
 	return 0;
+}
+
+/**
+ * Get the potential existing uuid put by previous mmdarwin call in a json
+ *
+ * params:
+ *  - pJson: the pointer on the json
+ *
+ * return: a valid json_object pointer if found, NULL otherwise
+ */
+struct json_object* get_uuid_object(smsg_t *const pMsg) {
+	struct json_object *mmdarwin_object = NULL;
+	struct json_object *result = NULL;
+
+	msgPropDescr_t propDesc;
+	msgPropDescrFill(&propDesc, (uchar *)JSON_LOOKUP_NAME, strlen(JSON_LOOKUP_NAME));
+	msgGetJSONPropJSON(pMsg, &propDesc, &mmdarwin_object);
+
+	if(mmdarwin_object) {
+		struct json_object_iterator it = json_object_iter_begin(mmdarwin_object);
+		struct json_object_iterator itEnd = json_object_iter_end(mmdarwin_object);
+
+		while(!json_object_iter_equal(&it, &itEnd)) {
+			const char *key = json_object_iter_peek_name(&it);
+
+			if(!strcmp(key, JSON_DARWIN_ID)) {
+				result = json_object_iter_peek_value(&it);
+				break;
+			}
+
+			json_object_iter_next(&it);
+		}
+	}
+
+	msgPropDescrDestruct(&propDesc);
+	return result;
 }
 
 BEGINbeginCnfLoad
@@ -825,8 +863,24 @@ could not extract field '%s' from message\n", pData->fieldList.name[i]);
 		.response = pData->response,
 		.filter_code = pData->filterCode,
 		.body_size = pWrkrData->darwinBody.bufferMsgSize};
-	/* generate uuid for Darwin event id */
-	uuid_generate(header.evt_id);
+
+	struct json_object *uuid = get_uuid_object(pMsg);
+	if(uuid) {
+		DBGPRINTF("mmdarwin: using existing UUID\n");
+		/* use existing UUID */
+		const char *val = json_object_get_string(uuid);
+		uuid_parse(val, header.evt_id);
+	}
+	else {
+		DBGPRINTF("mmdarwin: generating new uuid\n");
+		/* generate UUID for Darwin event id */
+		/* and add it to the Rsyslog message */
+		uuid_generate(header.evt_id);
+		char uuidStr[40];
+		uuid_unparse(header.evt_id, uuidStr);
+		DBGPRINTF("mmdarwin: darwin id = %s\n", uuidStr);
+		json_object_object_add(pJson, JSON_DARWIN_ID, json_object_new_string(uuidStr));
+	}
 
 	DBGPRINTF("mmdarwin::doAction:: sending header to Darwin\n");
 	CHKiRet(sendMsg(pWrkrData, &header, sizeof(darwin_filter_packet_t)));
@@ -839,10 +893,6 @@ could not extract field '%s' from message\n", pData->fieldList.name[i]);
 	{
 		DBGPRINTF("mmdarwin::doAction:: no response will be sent back "
 				"(darwin response type is set to 'no' or 'darwin')\n");
-		char uuidStr[40];
-		uuid_unparse(header.evt_id, uuidStr);
-		DBGPRINTF("uuid: %s\n", uuidStr);
-		json_object_object_add(pJson, "darwin_id", json_object_new_string(uuidStr));
 		goto finalize_it;
 	}
 
