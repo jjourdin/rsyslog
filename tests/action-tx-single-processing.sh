@@ -1,9 +1,16 @@
 #!/bin/bash
+# part of the rsyslog project, released under ASL 2.0
 . ${srcdir:=.}/diag.sh init
-mysql --user=rsyslog --password=testbench < ${srcdir}/testsuites/mysql-truncate.sql
+export NUMMESSAGES=5000
+export SEQ_CHECK_OPTIONS=-i2
+check_sql_data_ready() {
+	mysql_get_data
+	seq_check --check-only
+}
+export QUEUE_EMPTY_CHECK_FUNC=check_sql_data_ready
 generate_conf
 add_conf '
-$ModLoad ../plugins/ommysql/.libs/ommysql
+module(load="../plugins/ommysql/.libs/ommysql")
 global(errormessagestostderr.maxnumber="50")
 
 template(type="string" name="tpl" string="insert into SystemEvents (Message, Facility) values (\"%msg%\", %$!facility%)" option.sql="on")
@@ -17,15 +24,15 @@ if($msg contains "msgnum:") then {
 		set $/cntr = 0;
 	}
 	action(type="ommysql" name="mysql_action" server="127.0.0.1" template="tpl"
-	       db="Syslog" uid="rsyslog" pwd="testbench")
+	       db="'$RSYSLOG_DYNNAME'" uid="rsyslog" pwd="testbench")
 }
-action(type="omfile" file=`echo $RSYSLOG2_OUT_LOG`)
+action(type="omfile" file="'$RSYSLOG2_OUT_LOG'")
 '
+mysql_prep_for_test
 startup
-injectmsg 0 5000
+injectmsg
 shutdown_when_empty
 wait_shutdown
-# note "-s" is requried to suppress the select "field header"
-mysql -s --user=rsyslog --password=testbench < ${srcdir}/testsuites/mysql-select-msg.sql > $RSYSLOG_OUT_LOG
-seq_check  0 4999 -i2
+mysql_get_data
+seq_check
 exit_test

@@ -155,6 +155,7 @@ struct instanceConf_s {
 	int maxLinesAtOnce;
 	uint32_t trimLineOverBytes;
 	int msgFlag;
+	uchar *escapeLFString;
 	ruleset_t *pBindRuleset;	/* ruleset to bind listener to (use system default if unspecified) */
 	struct instanceConf_s *next;
 };
@@ -181,6 +182,7 @@ struct act_obj_s {
 	time_t timeoutBase; /* what time to calculate the timeout against? */
 	/* file dynamic data */
 	char file_id[FILE_ID_HASH_SIZE]; /* file id for this entry, once we could obtain it */
+	char file_id_prev[FILE_ID_HASH_SIZE]; /* previous file id for this entry, set if changed */
 	int in_move;	/* workaround for inotify move: if set, state file must not be deleted */
 	ino_t ino;	/* current inode nbr */
 	int fd;		/* fd to file in order to obtain file_id (needs to be preserved across move) */
@@ -309,6 +311,7 @@ static struct cnfparamdescr inppdescr[] = {
 	{ "discardtruncatedmsg", eCmdHdlrBinary, 0 },
 	{ "msgdiscardingerror", eCmdHdlrBinary, 0 },
 	{ "escapelf", eCmdHdlrBinary, 0 },
+	{ "escapelf.replacement", eCmdHdlrString, 0 },
 	{ "reopenontruncate", eCmdHdlrBinary, 0 },
 	{ "maxlinesatonce", eCmdHdlrInt, 0 },
 	{ "trimlineoverbytes", eCmdHdlrInt, 0 },
@@ -709,7 +712,7 @@ act_obj_add(fs_edge_t *const edge, const char *const name, const int is_file,
 		if (is_file) {
 			LogError(errno, RS_RET_ERR, "imfile: error accessing file '%s'", name);
 		} else { /* reporting only in debug for dirs as higher lvl paths are likely blocked by selinux */
-			DBGPRINTF("imfile: error accessing file '%s'", name);
+			DBGPRINTF("imfile: error accessing directory '%s'", name);
 		}
 		FINALIZE;
 	}
@@ -725,6 +728,7 @@ act_obj_add(fs_edge_t *const edge, const char *const name, const int is_file,
 	act->ino = ino;
 	act->fd = fd;
 	act->file_id[0] = '\0';
+	act->file_id_prev[0] = '\0';
 	act->is_symlink = is_symlink;
 	if (source) { /* we are target of symlink */
 		CHKmalloc(act->source_name = strdup(source));
@@ -1254,17 +1258,15 @@ get_file_id_hash(const char *data, size_t lendata,
 static void ATTR_NONNULL(1)
 getFileID(act_obj_t *const act)
 {
-	if(act->file_id[0] != '\0') {
-		return; /* everything already done */
-	}
+	/* save the old id for cleaning purposes */
+	strncpy(act->file_id_prev, (const char*)act->file_id, FILE_ID_HASH_SIZE);
+	act->file_id[0] = '\0';
 	assert(act->fd >= 0); /* fd must have been opened at act_obj_t creation! */
 	char filedata[FILE_ID_SIZE];
+	lseek(act->fd, 0, SEEK_SET); /* Seek to beginning of file so we have correct id */
 	const int r = read(act->fd, filedata, FILE_ID_SIZE);
 	if(r == FILE_ID_SIZE) {
 		get_file_id_hash(filedata, sizeof(filedata), act->file_id, sizeof(act->file_id));
-		dbgprintf("file_id '%s' obtained, closing monitoring file handle\n", act->file_id);
-		close(act->fd); /* we will never go here! */
-		act->fd = -1;
 	} else {
 		DBGPRINTF("getFileID partial or error read, ret %d\n", r);
 	}
@@ -1376,28 +1378,13 @@ openFileWithStateFile(act_obj_t *const act)
 	if(fd < 0) {
 		if(errno == ENOENT) {
 			if(act->file_id[0] != '\0') {
-				const char *pszSFNamHash = strdup((const char*)pszSFNam);
-				CHKmalloc(pszSFNamHash);
 				DBGPRINTF("state file %s for %s does not exist - trying to see if "
 					"inode-only file exists\n", pszSFNam, act->name);
 				getFullStateFileName(statefn, "", pszSFNam, sizeof(pszSFNam));
 				fd = open((char*)pszSFNam, O_CLOEXEC | O_NOCTTY | O_RDONLY, 0600);
 				if(fd >= 0) {
-					dbgprintf("found inode-only state file, renaming it now that we "
-						"know the file_id, new name: %s\n", pszSFNamHash);
-					/* we now can use identify the file, so let's rename it */
-					if(rename((const char*)pszSFNam, pszSFNamHash) != 0) {
-						LogError(errno, RS_RET_IO_ERROR,
-							"imfile error trying to rename state file for '%s' - "
-							"ignoring this error, usually this means a file no "
-							"longer file is left over, but this may also cause "
-							"some real trouble. Still the best we can do ",
-							act->name);
-						free((void*) pszSFNamHash);
-						ABORT_FINALIZE(RS_RET_IO_ERROR);
-					}
+					dbgprintf("found inode-only state file, will be renamed at next persist\n");
 				}
-				free((void*) pszSFNamHash);
 			}
 			if(fd < 0) {
 				DBGPRINTF("state file %s for %s does not exist - trying to see if "
@@ -1574,11 +1561,12 @@ pollFileReal(act_obj_t *act, cstr_t **pCStr)
 		if(inst->maxLinesAtOnce != 0 && nProcessed >= inst->maxLinesAtOnce)
 			break;
 		if((start_preg == NULL) && (end_preg == NULL)) {
-			CHKiRet(strm.ReadLine(act->pStrm, pCStr, inst->readMode, inst->escapeLF,
+			CHKiRet(strm.ReadLine(act->pStrm, pCStr, inst->readMode, inst->escapeLF, inst->escapeLFString,
 				inst->trimLineOverBytes, &strtOffs));
 		} else {
 			CHKiRet(strmReadMultiLine(act->pStrm, pCStr, start_preg, end_preg,
-				inst->escapeLF, inst->discardTruncatedMsg, inst->msgDiscardingError, &strtOffs));
+				inst->escapeLF, inst->escapeLFString, inst->discardTruncatedMsg,
+				inst->msgDiscardingError, &strtOffs));
 		}
 		++nProcessed;
 		if(startOffs < FILE_ID_SIZE && act->pStrm->iCurrOffs >= FILE_ID_SIZE) {
@@ -1654,6 +1642,7 @@ createInstance(instanceConf_t **const pinst)
 	inst->msgDiscardingError = 1;
 	inst->bRMStateOnDel = 1;
 	inst->escapeLF = 1;
+	inst->escapeLFString = NULL;
 	inst->reopenOnTruncate = 0;
 	inst->addMetadata = ADD_METADATA_UNSPECIFIED;
 	inst->addCeeTag = 0;
@@ -1801,6 +1790,7 @@ addInstance(void __attribute__((unused)) *pVal, uchar *pNewVal)
 	inst->iPersistStateInterval = cs.iPersistStateInterval;
 	inst->readMode = cs.readMode;
 	inst->escapeLF = 0;
+	inst->escapeLFString = NULL;
 	inst->reopenOnTruncate = 0;
 	inst->addMetadata = 0;
 	inst->addCeeTag = 0;
@@ -1880,6 +1870,8 @@ CODESTARTnewInpInst
 			inst->fileNotFoundError = (sbool) pvals[i].val.d.n;
 		} else if(!strcmp(inppblk.descr[i].name, "escapelf")) {
 			inst->escapeLF = (sbool) pvals[i].val.d.n;
+		} else if(!strcmp(inppblk.descr[i].name, "escapelf.replacement")) {
+			inst->escapeLFString = (uchar*)es_str2cstr(pvals[i].val.d.estr, NULL);
 		} else if(!strcmp(inppblk.descr[i].name, "reopenontruncate")) {
 			inst->reopenOnTruncate = (sbool) pvals[i].val.d.n;
 		} else if(!strcmp(inppblk.descr[i].name, "maxlinesatonce")) {
@@ -2332,14 +2324,10 @@ done:	return;
 
 
 /* Monitor files in inotify mode */
-PRAGMA_DIAGNOSTIC_PUSH
-PRAGMA_IGNORE_Wcast_align
-/* Problem with the warnings: they seem to stem back from the way the API is structured */
 static rsRetVal
 do_inotify(void)
 {
 	char iobuf[8192];
-	struct inotify_event *ev;
 	int rd;
 	int currev;
 	DEFiRet;
@@ -2394,10 +2382,14 @@ do_inotify(void)
 		}
 		currev = 0;
 		while(currev < rd) {
-			ev = (struct inotify_event*) (iobuf+currev);
-			in_dbg_showEv(ev);
-			in_processEvent(ev);
-			currev += sizeof(struct inotify_event) + ev->len;
+			union {
+				char *buf;
+				struct inotify_event *ev;
+			} savecast;
+			savecast.buf = iobuf+currev;
+			in_dbg_showEv(savecast.ev);
+			in_processEvent(savecast.ev);
+			currev += sizeof(struct inotify_event) + savecast.ev->len;
 		}
 	}
 
@@ -2405,7 +2397,6 @@ finalize_it:
 	close(ino_fd);
 	RETiRet;
 }
-PRAGMA_DIAGNOSTIC_POP
 
 #else /* #if HAVE_INOTIFY_INIT */
 static rsRetVal
@@ -2602,6 +2593,36 @@ finalize_it:
 	RETiRet;
 }
 
+/* This function should be called after any file ID change - that is if
+ * file grown from hash-only statefile, or was truncated, this will ensure
+ * we delete the old file so we do not make garbage in our working dir and
+ * there are no leftover statefiles which can in theory later bind to something
+ * and cause data loss.
+ * jvymazal 2019-11-27
+ */
+static void
+removeOldStatefile(const uchar *statefn, const char *hashToDelete)
+{
+	int ret;
+	uchar statefname[MAXFNAME];
+
+	getFullStateFileName(statefn, hashToDelete, statefname, sizeof(statefname));
+	DBGPRINTF("removing old state file: '%s'\n", statefname);
+	ret = unlink((const char*)statefname);
+	if(ret != 0) {
+		if (errno != ENOENT) {
+			LogError(errno, RS_RET_IO_ERROR,
+				"imfile error trying to delete old state file: '%s' - ignoring this "
+				"error, usually this means a file no longer file is left over, but "
+				"this may also cause some real trouble. Still the best we can do ",
+				statefname);
+		} else {
+			DBGPRINTF("trying to delete no longer valid statefile '%s' which no "
+					  "longer exists (probably already deleted)\n", statefname);
+		}
+	}
+}
+
 
 /* This function persists information for a specific file being monitored.
  * To do so, it simply persists the stream object. We do NOT abort on error
@@ -2652,6 +2673,11 @@ persistStrmState(act_obj_t *const act)
 
 	CHKiRet(atomicWriteStateFile((const char*)statefname, jstr));
 	json_object_put(json);
+
+	/* file-id changed remove the old statefile */
+	if (strncmp((const char *)act->file_id_prev, (const char *)act->file_id, FILE_ID_HASH_SIZE)) {
+		removeOldStatefile(statefn, act->file_id_prev);
+	}
 
 finalize_it:
 	if(iRet != RS_RET_OK) {

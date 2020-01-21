@@ -2,7 +2,7 @@
 # This file is part of the rsyslog project, released under ASL 2.0
 
 # Similar to the 'omprog-output-capture.sh' test, with multiple worker
-# threads on high load. Checks that the lines concurrently emmitted to
+# threads on high load. Checks that the lines concurrently emitted to
 # stdout/stderr by the various program instances are not intermingled in
 # the output file (i.e., are captured atomically by omprog) when 1) the
 # lines are less than PIPE_BUF bytes long and 2) the program writes the
@@ -25,7 +25,7 @@ else
     LINE_LENGTH=511   # 512 minus 1 byte (for the newline char)
 fi
 
-export command_line="$srcdir/testsuites/omprog-output-capture-mt-bin.py $LINE_LENGTH"
+export command_line="$PYTHON $srcdir/testsuites/omprog-output-capture-mt-bin.py $LINE_LENGTH"
 empty_check() {
 	if [ $(wc -l < "$RSYSLOG_OUT_LOG") -eq $((NUMMESSAGES * 2)) ]; then
 		return 0

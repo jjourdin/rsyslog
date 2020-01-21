@@ -2,9 +2,9 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ(2.61)
-AC_INIT([rsyslog],[8.1911.0],[rsyslog@lists.adiscon.com])  # UPDATE on release
-AC_DEFINE(VERSION_YEAR, 19, [year part of real rsyslog version])  # UPDATE on release
-AC_DEFINE(VERSION_MONTH,11, [month part of real rsyslog version]) # UPDATE on release
+AC_INIT([rsyslog],[8.2002.master], [rsyslog@lists.adiscon.com])   # UPDATE on release
+AC_DEFINE(VERSION_YEAR, 20, [year part of real rsyslog version])  # UPDATE on release
+AC_DEFINE(VERSION_MONTH,02, [month part of real rsyslog version]) # UPDATE on release
 
 AM_INIT_AUTOMAKE([subdir-objects])
 
@@ -140,6 +140,7 @@ AM_CONDITIONAL(OS_APPLE, test x$os_type == xapple)
 AM_CONDITIONAL(OS_LINUX, test x$os_type == xlinux)
 AM_CONDITIONAL(OS_AIX, test x$os_type == xaix)
 
+AM_PATH_PYTHON(,, [:])
 
 # Running from git source?
 in_git_src=no
@@ -813,24 +814,26 @@ AC_ARG_ENABLE(pgsql,
         [enable_pgsql=no]
 )
 if test "x$enable_pgsql" = "xyes"; then
-  AC_CHECK_PROG(
-    [PG_CONFIG],
-    [pg_config],
-    [pg_config],
-    [no],,,
-  )
-  if test "x${PG_CONFIG}" = "xno"; then
-    AC_MSG_FAILURE([pg_config not found])
-  fi
-  AC_CHECK_LIB(
-    [pq],
-    [PQconnectdb],
-    [PGSQL_CFLAGS="-I`$PG_CONFIG --includedir`"
-     PGSQL_LIBS="-L`$PG_CONFIG --libdir` -lpq"
-    ],
-    [AC_MSG_FAILURE([PgSQL library is missing])],
-    [-L`$PG_CONFIG --libdir`]
-  )
+	PKG_CHECK_MODULES([PGSQL], [libpq],, [
+	  AC_CHECK_PROG(
+	    [PG_CONFIG],
+	    [pg_config],
+	    [pg_config],
+	    [no],,,
+	  )
+	  if test "x${PG_CONFIG}" = "xno"; then
+	    AC_MSG_FAILURE([pg_config not found])
+	  fi
+	  AC_CHECK_LIB(
+	    [pq],
+	    [PQconnectdb],
+	    [PGSQL_CFLAGS="-I`$PG_CONFIG --includedir`"
+	     PGSQL_LIBS="-L`$PG_CONFIG --libdir` -lpq"
+	    ],
+	    [AC_MSG_FAILURE([PgSQL library is missing])],
+	    [-L`$PG_CONFIG --libdir`]
+	  )
+	])
 fi
 AM_CONDITIONAL(ENABLE_PGSQL, test x$enable_pgsql = xyes)
 AC_SUBST(PGSQL_CFLAGS)
@@ -902,6 +905,17 @@ AM_CONDITIONAL(ENABLE_SNMP, test x$enable_snmp = xyes)
 AC_SUBST(SNMP_CFLAGS)
 AC_SUBST(SNMP_LIBS)
 
+# SNMP Test Support
+AC_ARG_ENABLE(snmp-tests,
+        [AS_HELP_STRING([--enable-snmp-tests],[Enable omsnmp tests @<:@default=no@:>@])],
+        [case "${enableval}" in
+         yes) enable_snmp_tests="yes" ;;
+          no) enable_snmp_tests="no" ;;
+           *) AC_MSG_ERROR(bad value ${enableval} for --enable-snmp-tests) ;;
+         esac],
+        [enable_snmp_tests=no]
+)
+AM_CONDITIONAL(ENABLE_SNMP_TESTS, test x$enable_snmp_tests = xyes)
 
 # uuid support
 AC_ARG_ENABLE(uuid,
@@ -1475,11 +1489,17 @@ if test "x$enable_relp" = "xyes"; then
                       [AC_DEFINE([HAVE_RELPSRVSETLSTNADDR], [1], [Define if relpSrvSetLstnAddr exists.])])
         AC_CHECK_FUNC([relpEngineSetTLSLibByName],
                       [AC_DEFINE([HAVE_RELPENGINESETTLSLIBBYNAME], [1], [Define if relpEngineSetTLSLibByName exists.])])
+        AC_CHECK_FUNC([relpSrvSetTlsConfigCmd],
+                      [AC_DEFINE([HAVE_RELPENGINESETTLSCFGCMD], [1], [Define if relpSrvSetTlsConfigCmd exists.])])
+
+        AC_CHECK_FUNC([relpSrvSetTlsConfigCmd],
+                      [HAVE_RELPENGINESETTLSCFGCMD=1])
 
         CFLAGS="$save_CFLAGS"
         LIBS="$save_LIBS"
 fi
 AM_CONDITIONAL(ENABLE_RELP, test x$enable_relp = xyes)
+AM_CONDITIONAL([USE_RELPENGINESETTLSCFGCMD], [test "x$HAVE_RELPENGINESETTLSCFGCMD" = x1])
 
 # RELP default port
 AC_ARG_ENABLE(omrelp-default-port,
@@ -2547,6 +2567,7 @@ AC_CONFIG_FILES([Makefile \
 		contrib/mmtaghostname/Makefile \
 		contrib/imdocker/Makefile \
 		contrib/pmdb2diag/Makefile \
+		tests/set-envvars \
 		tests/Makefile])
 AC_OUTPUT
 
@@ -2671,6 +2692,7 @@ echo "    PostgreSQL Tests enabled:                 $enable_pgsql_tests"
 echo "    Kafka Tests enabled:                      $enable_kafka_tests"
 echo "    Imdocker Tests enabled:                   $enable_imdocker_tests"
 echo "    systemd journal tests enabled:            $enable_journal_tests"
+echo "    SNMP Tests enabled:                       $enable_snmp_tests"
 echo "    Debug mode enabled:                       $enable_debug"
 echo "    (total) debugless mode enabled:           $enable_debugless"
 echo "    Diagnostic tools enabled:                 $enable_diagtools"

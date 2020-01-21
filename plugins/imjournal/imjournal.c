@@ -73,8 +73,8 @@ struct modConfData_s {
 static struct configSettings_s {
 	char *stateFile;
 	int iPersistStateInterval;
-	int ratelimitInterval;
-	int ratelimitBurst;
+	unsigned int ratelimitInterval;
+	unsigned int ratelimitBurst;
 	int bIgnorePrevious;
 	int bIgnoreNonValidStatefile;
 	int iDfltSeverity;
@@ -601,27 +601,33 @@ handleRotation(void)
 		ABORT_FINALIZE(RS_RET_ERR);
 	}
 
-	/* If we have locally saved cursor there is no need to read it from state file */
-	if (journalContext.cursor)
+	/* outside error scenarios we should always have a cursor available at this point */
+	if (!journalContext.cursor)
 	{
-		if (sd_journal_seek_cursor(journalContext.j, journalContext.cursor) != 0) {
-			LogError(0, RS_RET_ERR, "imjournal: "
-				"couldn't seek to cursor `%s'\n", journalContext.cursor);
-			iRet = RS_RET_ERR;
+		if (cs.stateFile) {
+			iRet = loadJournalState();
 		}
-		journalContext.atHead = 0;
-		/* Need to advance because cursor points at last processed message */
-		if ((r = sd_journal_next(journalContext.j)) < 0) {
-			LogError(-r, RS_RET_ERR, "imjournal: sd_journal_next() failed");
-			iRet = RS_RET_ERR;
+		else if (cs.bIgnorePrevious) {
+			/* Seek to the very end of the journal and ignore all older messages. */
+			iRet = skipOldMessages();
 		}
+		FINALIZE;
 	}
-	else if (cs.stateFile) {
-		iRet = loadJournalState();
+
+	if (sd_journal_seek_cursor(journalContext.j, journalContext.cursor) != 0) {
+		LogError(0, RS_RET_ERR, "imjournal: "
+			"couldn't seek to cursor `%s'\n", journalContext.cursor);
+		iRet = RS_RET_ERR;
 	}
-	journalContext.reloaded = 1;
+	journalContext.atHead = 0;
+	/* Need to advance because cursor points at last processed message */
+	if ((r = sd_journal_next(journalContext.j)) < 0) {
+		LogError(-r, RS_RET_ERR, "imjournal: sd_journal_next() failed");
+		iRet = RS_RET_ERR;
+	}
 
 finalize_it:
+	journalContext.reloaded = 1;
 	RETiRet;
 }
 
@@ -759,7 +765,7 @@ tryRecover(void) {
 	LogMsg(0, RS_RET_OK, LOG_INFO, "imjournal: trying to recover from journal error");
 	STATSCOUNTER_INC(statsCounter.ctrRecoveryAttempts, statsCounter.mutCtrRecoveryAttempts);
 	closeJournal();
-	srSleep(10, 0);	// do not hammer machine with too-frequent retries
+	srSleep(0, 200000);	// do not hammer machine with too-frequent retries
 	openJournal();
 }
 
@@ -768,7 +774,7 @@ BEGINrunInput
 	uint64_t count = 0;
 CODESTARTrunInput
 	CHKiRet(ratelimitNew(&ratelimiter, "imjournal", NULL));
-	dbgprintf("imjournal: ratelimiting burst %d, interval %d\n", cs.ratelimitBurst,
+	dbgprintf("imjournal: ratelimiting burst %u, interval %u\n", cs.ratelimitBurst,
 		  cs.ratelimitInterval);
 	ratelimitSetLinuxLike(ratelimiter, cs.ratelimitInterval, cs.ratelimitBurst);
 	ratelimitSetNoTimeCache(ratelimiter);
@@ -1003,9 +1009,9 @@ CODESTARTsetModCnf
 		} else if (!strcmp(modpblk.descr[i].name, "statefile")) {
 			cs.stateFile = (char *)es_str2cstr(pvals[i].val.d.estr, NULL);
 		} else if(!strcmp(modpblk.descr[i].name, "ratelimit.burst")) {
-			cs.ratelimitBurst = (int) pvals[i].val.d.n;
+			cs.ratelimitBurst = (unsigned int) pvals[i].val.d.n;
 		} else if(!strcmp(modpblk.descr[i].name, "ratelimit.interval")) {
-			cs.ratelimitInterval = (int) pvals[i].val.d.n;
+			cs.ratelimitInterval = (unsigned int) pvals[i].val.d.n;
 		} else if (!strcmp(modpblk.descr[i].name, "ignorepreviousmessages")) {
 			cs.bIgnorePrevious = (int) pvals[i].val.d.n;
 		} else if (!strcmp(modpblk.descr[i].name, "ignorenonvalidstatefile")) {

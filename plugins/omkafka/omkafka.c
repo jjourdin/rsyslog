@@ -32,6 +32,7 @@
 #include <sys/uio.h>
 #include <sys/queue.h>
 #include <sys/types.h>
+#include <math.h>
 #ifdef HAVE_SYS_STAT_H
 #	include <sys/stat.h>
 #endif
@@ -1225,7 +1226,6 @@ static rsRetVal
 openKafka(instanceData *const __restrict__ pData)
 {
 	char errstr[MAX_ERRMSG];
-	int nBrokers = 0;
 	DEFiRet;
 
 	if(pData->bIsOpen)
@@ -1290,7 +1290,7 @@ openKafka(instanceData *const __restrict__ pData)
 	rd_kafka_conf_set_log_cb(pData->rk, kafkaLogger);
 #	endif
 	DBGPRINTF("omkafka setting brokers: '%s'n", pData->brokers);
-	if((nBrokers = rd_kafka_brokers_add(pData->rk, (char*)pData->brokers)) == 0) {
+	if(rd_kafka_brokers_add(pData->rk, (char*)pData->brokers) == 0) {
 		LogError(0, RS_RET_KAFKA_NO_VALID_BROKERS,
 			"omkafka: no valid brokers specified: %s\n", pData->brokers);
 		ABORT_FINALIZE(RS_RET_KAFKA_NO_VALID_BROKERS);
@@ -1484,7 +1484,7 @@ loadFailedMsgs(instanceData *const __restrict__ pData)
 	CHKiRet(strm.SetFName(pstrmFMSG, pData->failedMsgFile, ustrlen(pData->failedMsgFile)));
 	CHKiRet(strm.ConstructFinalize(pstrmFMSG));
 
-	while(strm.ReadLine(pstrmFMSG, &pCStr, 0, 0, 0, NULL) == RS_RET_OK) {
+	while(strm.ReadLine(pstrmFMSG, &pCStr, 0, 0, NULL, 0, NULL) == RS_RET_OK) {
 		if(rsCStrLen(pCStr) == 0) {
 			/* we do not process empty lines */
 			DBGPRINTF("omkafka: loadFailedMsgs msg was empty!");
@@ -2002,6 +2002,7 @@ CODESTARTmodInit
 INITLegCnfVars
 	*ipIFVersProvided = CURR_MOD_IF_VERSION;
 CODEmodInit_QueryRegCFSLineHdlr
+	dbgprintf("just because librdkafka needs it, sqrt of 4 is %f\n", sqrt(4.0));
 	CHKiRet(objUse(datetime, CORE_COMPONENT));
 	CHKiRet(objUse(strm, CORE_COMPONENT));
 	CHKiRet(objUse(statsobj, CORE_COMPONENT));

@@ -179,6 +179,10 @@ if ENABLE_OMHTTP
 SUBDIRS += contrib/omhttp
 endif
 
+if ENABLE_SNMP
+SUBDIRS += plugins/omsnmp
+endif
+
 if ENABLE_MMSNMPTRAPD
 SUBDIRS += plugins/mmsnmptrapd
 endif
@@ -385,6 +389,9 @@ DISTCHECK_CONFIGURE_FLAGS+= \
 	--enable-pmsnare \
 	--enable-usertools
 
+else
+DISTCHECK_CONFIGURE_FLAGS+= \
+	--disable-default-tests
 endif  # if ENABLE_DEFAULT_TESTS
 
 if ENABLE_IMPROG
@@ -449,6 +456,10 @@ endif
 
 if ENABLE_SNMP
 DISTCHECK_CONFIGURE_FLAGS+= --enable-snmp
+endif
+
+if ENABLE_SNMP_TESTS
+DISTCHECK_CONFIGURE_FLAGS+= --enable-snmp-tests
 endif
 
 if ENABLE_FMHTTP

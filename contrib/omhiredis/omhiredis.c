@@ -124,12 +124,9 @@ CODESTARTfreeInstance
 	if (pData->server != NULL) {
 		free(pData->server);
 	}
-	if (pData->key)
-		free(pData->key);
-	if (pData->modeDescription)
-		free(pData->modeDescription);
-	if (pData->serverpassword)
-		free(pData->serverpassword);
+	free(pData->key);
+	free(pData->modeDescription);
+	free(pData->serverpassword);
 ENDfreeInstance
 
 BEGINfreeWrkrInstance
@@ -183,6 +180,9 @@ finalize_it:
 static rsRetVal writeHiredis(uchar* key, uchar *message, wrkrInstanceData_t *pWrkrData)
 {
 	DEFiRet;
+	int rc, expire;
+	size_t msgLen;
+	char *formattedMsg = NULL;
 
 	/* if we do not have a redis connection, call
 	 * initHiredis and try to establish one */
@@ -194,9 +194,6 @@ static rsRetVal writeHiredis(uchar* key, uchar *message, wrkrInstanceData_t *pWr
 	 * happened, in which case abort. otherwise
 	 * increase our current pipeline count
 	 * by 1 and continue. */
-	int rc, expire;
-	size_t msgLen;
-	char *formattedMsg = NULL;
 	switch(pWrkrData->pData->mode) {
 		case OMHIREDIS_MODE_TEMPLATE:
 			rc = redisAppendCommand(pWrkrData->conn, (char*)message);
@@ -238,8 +235,7 @@ static rsRetVal writeHiredis(uchar* key, uchar *message, wrkrInstanceData_t *pWr
 	}
 
 finalize_it:
-	if (formattedMsg)
-		free(formattedMsg);
+	free(formattedMsg);
 	RETiRet;
 }
 
@@ -328,6 +324,7 @@ BEGINnewActInst
 	struct cnfparamvals *pvals;
 	int i;
 	int iNumTpls;
+	uchar *keydup = NULL;
 CODESTARTnewActInst
 	if((pvals = nvlstGetParams(lst, &actpblk, NULL)) == NULL)
 		ABORT_FINALIZE(RS_RET_MISSING_CNFPARAMS);
@@ -397,8 +394,8 @@ CODESTARTnewActInst
 				CHKmalloc(pData->tplName = ustrdup("RSYSLOG_ForwardFormat"));
 			}
 			if (pData->expiration && strcmp(pData->modeDescription, "set")) {
-				LogError(0, RS_RET_CONF_PARSE_WARNING, "omhiredis: expiration set but mode is not 'set', "\
-					" expiration will be ignored");
+				LogError(0, RS_RET_CONF_PARSE_WARNING, "omhiredis: expiration set but mode is not "\
+				"'set', expiration will be ignored");
 			}
 			break;
 		case OMHIREDIS_MODE_TEMPLATE:
@@ -412,6 +409,7 @@ CODESTARTnewActInst
 	iNumTpls = 1;
 
 	if (pData->dynaKey) {
+		assert(pData->key != NULL);
 		iNumTpls = 2;
 	}
 	CODE_STD_STRING_REQUESTnewActInst(iNumTpls);
@@ -419,11 +417,14 @@ CODESTARTnewActInst
 	CHKiRet(OMSRsetEntry(*ppOMSR, 0, (uchar*)pData->tplName, OMSR_NO_RQD_TPL_OPTS));
 
 	if (pData->dynaKey) {
+		CHKmalloc(keydup = ustrdup(pData->key));
 		CHKiRet(OMSRsetEntry(*ppOMSR, 1, ustrdup(pData->key), OMSR_NO_RQD_TPL_OPTS));
+		keydup = NULL; /* handed over */
 	}
 
 CODE_STD_FINALIZERnewActInst
 	cnfparamvalsDestruct(pvals, &actpblk);
+	free(keydup);
 ENDnewActInst
 
 
