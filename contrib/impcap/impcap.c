@@ -9,8 +9,10 @@
  * File begun on 2018-11-13
  *
  * Created by:
+ *  - Théo Bertin (theo.bertin@advens.fr)
+ *
+ * With:
  *  - François Bernard (francois.bernard@isen.yncrea.fr)
- *  - Théo Bertin (theo.bertin@isen.yncrea.fr)
  *  - Tianyu Geng (tianyu.geng@isen.yncrea.fr)
  *
  * This file is part of rsyslog.
@@ -63,8 +65,8 @@ MODULE_TYPE_INPUT
 MODULE_TYPE_NOKEEP
 MODULE_CNFNAME("impcap")
 
-#define JSON_LOOKUP_NAME "!impcap"
-#define JSON_DATA_NAME "!data"
+#define DEFAULT_META_CONTAINER "!impcap"
+#define DEFAULT_DATA_CONTAINER "!data"
 
 
 /* static data */
@@ -109,6 +111,8 @@ struct modConfData_s {
 	instanceConf_t *root, *tail;
 	uint16_t snap_length;
 	uint8_t metadataOnly;
+	char *metadataContainer;
+	char *dataContainer;
 };
 
 static modConfData_t *loadModConf = NULL;/* modConf ptr to use for the current load process */
@@ -135,8 +139,10 @@ static struct cnfparamblk inppblk = {
 
 /* module-global parameters */
 static struct cnfparamdescr modpdescr[] = {
-		{"snap_length",   eCmdHdlrPositiveInt, 0},
-		{"metadata_only", eCmdHdlrBinary,      0}
+		{"snap_length",		eCmdHdlrPositiveInt,	0},
+		{"metadata_only",	eCmdHdlrBinary,		0},
+		{"metadata_container",	eCmdHdlrGetWord,	0},
+		{"data_container",	eCmdHdlrGetWord,	0}
 };
 static struct cnfparamblk modpblk = {
 		CNFPARAMBLK_VERSION,
@@ -271,10 +277,22 @@ CODESTARTsetModCnf
 		else if (!strcmp(modpblk.descr[i].name, "metadata_only")) {
 			loadModConf->metadataOnly = (uint8_t)pvals[i].val.d.n;
 		}
+		else if (!strcmp(modpblk.descr[i].name, "metadata_container")) {
+			loadModConf->metadataContainer = (char *)es_str2cstr(pvals[i].val.d.estr, NULL);
+		}
+		else if (!strcmp(modpblk.descr[i].name, "data_container")) {
+			loadModConf->dataContainer = (char *)es_str2cstr(pvals[i].val.d.estr, NULL);
+		}
 		else {
 			dbgprintf("impcap: non-handled param %s in beginSetModCnf\n", modpblk.descr[i].name);
 		}
 	}
+
+	if (!loadModConf->metadataContainer)
+		CHKmalloc(loadModConf->metadataContainer = strdup(DEFAULT_META_CONTAINER));
+
+	if (!loadModConf->dataContainer)
+		CHKmalloc(loadModConf->dataContainer = strdup(DEFAULT_DATA_CONTAINER));
 finalize_it:
 	if (pvals != NULL)
 		cnfparamvalsDestruct(pvals, &modpblk);
@@ -288,6 +306,8 @@ CODESTARTbeginCnfLoad
 	loadModConf->pConf = pConf;
 	loadModConf->metadataOnly = 0;
 	loadModConf->snap_length = 65535;
+	loadModConf->metadataContainer = NULL;
+	loadModConf->dataContainer = NULL;
 ENDbeginCnfLoad
 
 BEGINendCnfLoad
@@ -314,6 +334,15 @@ CODESTARTcheckCnf
 
 	if (pModConf->metadataOnly) {   /* if metadata_only is "on", snap_length is overwritten */
 		pModConf->snap_length = 100; /* arbitrary value, but should be enough for most protocols */
+	}
+
+	if (!pModConf->metadataContainer || !pModConf->dataContainer) {
+		LogError(0, RS_RET_LOAD_ERROR, "impcap: no name defined for metadata_container and "
+				"data_container, this shouldn't happen");
+	}
+	else {
+		DBGPRINTF("impcap: metadata will be stored in '%s', and data in '%s'\n",
+				pModConf->metadataContainer, pModConf->dataContainer);
 	}
 
 	for (inst = pModConf->root ; inst != NULL ; inst = inst->next) {
@@ -410,29 +439,28 @@ CODESTARTactivateCnf
 					LogError(0, NO_ERRCODE, "pcap: %s", pcap_geterr(dev));
 					break;
 				case PCAP_ERROR_ACTIVATED:
-					LogError(0, RS_RET_LOAD_ERROR, "already activated");
-					break;
+					LogError(0, RS_RET_LOAD_ERROR, "already activated, shouldn't happen");
+					ABORT_FINALIZE(RS_RET_LOAD_ERROR);
 				case PCAP_ERROR_NO_SUCH_DEVICE:
 					LogError(0, RS_RET_LOAD_ERROR, "device doesn't exist");
-					break;
+					ABORT_FINALIZE(RS_RET_LOAD_ERROR);
 				case PCAP_ERROR_PERM_DENIED:
 					LogError(0, RS_RET_LOAD_ERROR, "elevated privilege needed to open capture "
 												   "interface");
-					break;
+					ABORT_FINALIZE(RS_RET_LOAD_ERROR);
 				case PCAP_ERROR_PROMISC_PERM_DENIED:
 					LogError(0, RS_RET_LOAD_ERROR, "elevated privilege needed to put interface "
-						     "in promiscuous mode");
-					break;
+							 "in promiscuous mode");
+					ABORT_FINALIZE(RS_RET_LOAD_ERROR);
 				case PCAP_ERROR_RFMON_NOTSUP:
 					LogError(0, RS_RET_LOAD_ERROR, "interface doesn't support monitor mode");
-					break;
+					ABORT_FINALIZE(RS_RET_LOAD_ERROR);
 				case PCAP_ERROR_IFACE_NOT_UP:
 					LogError(0, RS_RET_LOAD_ERROR, "interface is not up");
-					break;
+					ABORT_FINALIZE(RS_RET_LOAD_ERROR);
 				case PCAP_ERROR:
 					LogError(0, RS_RET_LOAD_ERROR, "pcap: %s", pcap_geterr(dev));
 					ABORT_FINALIZE(RS_RET_LOAD_ERROR);
-					break;
 			}
 
 			if (inst->filter != NULL) {
@@ -489,6 +517,8 @@ CODESTARTfreeCnf
 		free(del->tag);
 		free(del);
 	}
+	free(pModConf->metadataContainer);
+	free(pModConf->dataContainer);
 	DBGPRINTF("impcap: finished freeing confs\n");
 ENDfreeCnf
 
@@ -617,12 +647,12 @@ void packet_parse(uchar *arg, const struct pcap_pkthdr *pkthdr, const uchar *pac
 		struct json_object *jadd = json_object_new_object();
 		json_object_object_add(jadd, "length", json_object_new_int(strlen(dataHex)));
 		json_object_object_add(jadd, "content", json_object_new_string(dataHex));
-		msgAddJSON(pMsg, (uchar *)JSON_DATA_NAME, jadd, 0, 0);
+		msgAddJSON(pMsg, (uchar *)runModConf->dataContainer, jadd, 0, 0);
 		free(dataHex);
 	}
 	free(dataLeft);
 
-	msgAddJSON(pMsg, (uchar *)JSON_LOOKUP_NAME, jown, 0, 0);
+	msgAddJSON(pMsg, (uchar *)runModConf->metadataContainer, jown, 0, 0);
 	submitMsg2(pMsg);
 }
 

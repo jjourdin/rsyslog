@@ -1802,6 +1802,24 @@ AC_ARG_ENABLE(impstats,
 )
 AM_CONDITIONAL(ENABLE_IMPSTATS, test x$enable_impstats = xyes)
 
+# settings for the pcap input module
+AC_ARG_ENABLE(impcap,
+        [AS_HELP_STRING([--enable-impcap],[libpcap input module enabled @<:@default=no@:>@])],
+        [case "${enableval}" in
+         yes) enable_impcap="yes" ;;
+          no) enable_impcap="no" ;;
+           *) AC_MSG_ERROR(bad value ${enableval} for --enable-impcap) ;;
+         esac],
+        [enable_impcap=no]
+)
+
+if test "x$enable_impcap" = "xyes"; then
+				AC_CHECK_HEADERS([pcap.h],
+				[AC_MSG_NOTICE([pcap found])],
+				AC_MSG_ERROR([libpcap library and headers not found])
+				)
+fi
+AM_CONDITIONAL(ENABLE_IMPCAP, test x$enable_impcap = xyes)
 
 # settings for the omprog output module
 AC_ARG_ENABLE(omprog,

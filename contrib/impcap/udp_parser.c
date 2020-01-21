@@ -5,8 +5,10 @@
  * File begun on 2018-11-13
  *
  * Created by:
+ *  - Théo Bertin (theo.bertin@advens.fr)
+ *
+ * With:
  *  - François Bernard (francois.bernard@isen.yncrea.fr)
- *  - Théo Bertin (theo.bertin@isen.yncrea.fr)
  *  - Tianyu Geng (tianyu.geng@isen.yncrea.fr)
  *
  * This file is part of rsyslog.
