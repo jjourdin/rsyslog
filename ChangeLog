@@ -1,5 +1,41 @@
 ----------------------------------------------------------------------------------------
 Scheduled Release 8.2002.0 (aka 2020.02) 2020-02-25
+- 2020-01-27: build system: add option --enable-gnutls-tests
+  This enables us to build GNUtls support but not necessarily
+  test it in CI. This is useful for some specialised subcomponent
+  test. The default is enabled if gnutls is enabled and disabled if not.
+- 2020-01-26: testbench: new test for loadbalancing via global vars
+  This is a popular functionality which had not been routinely tested
+  in the past.
+- 2020-01-26: mmdblookup bugfix: invalid data returned when no entry found
+  Since the upgrade of the package libmaxminddb on FreeBSD (1.3.2_2 -> 1.4.2),
+  the module mmdblookup returns the first entry of the mmdb database even if the entry
+  is not found. After some debug, I found the solution in the official maxminddb
+  repository : to check if the entry is in database, we must check the found_entry
+  attribute, otherwise the function MMDB_get_entry_data_list will return the first
+  entry of the database if the entry is not found in it.
+  Thanks to Kevin Guillemot for the patch.
+- 2020-01-23: oversize message log bugfix: do not close fd -1
+  The oversize message log fd is always closed on HUP, even if it never
+  was opened (and thus has -1 value). This patch corrects the issue.
+  The bug had no know-bad effect in practice other than getting an
+  (ignored) error status from close(). However, it introduced warnings
+  in test runs (e.g. when running under valgrind).
+- 2020-01-22: imfile bugfix: saving of old file_id for statefiles
+  Previously we saved old file_id unconditionally, which led to not
+  deleting old statefiles if files changes without rsyslog running.
+  Now it should work correctly.
+  Thanks to Jiri Vymazal for the patch.
+- 2020-01-22: imfile bugfix: misadressing and potential segfault
+  Commit 3f72e8c introduced an invalid memory allocation size. This lead to
+  too-short alloc and thus to overwrite of non-owned memory. That in turn
+  could lead to segfaults or other hard to find problems.
+  The issue was detected by our upgraded CI system. We did not receive
+  any problem reports in practice. Nevertheless, the problem is real and
+  people should update affected versions to patched ones.
+  The bug was present in scheduled stable release 8.1911.0 and 8.2001.0.
+  see also: https://github.com/rsyslog/rsyslog/issues/4120
+  see also: https://github.com/rsyslog/rsyslog/pull/4141
 - 2020-01-20: core bugfix: potential race during HUP
   when rsyslog is HUPed immediately after startup and before it is fully
   initialized, there is a potential race with the list of loaded modules.
