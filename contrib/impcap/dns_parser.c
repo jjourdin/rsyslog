@@ -1,13 +1,13 @@
-/* smb_parser.c
+/* dns_parser.c
  *
- * This file contains functions to parse SMB (version 2 and 3) headers.
+ * This file contains functions to parse DNS headers.
  *
  * File begun on 2018-11-13
  *
  * Created by:
- *  - François Bernard (francois.bernard@isen.yncrea.fr)
- *  - Théo Bertin (theo.bertin@isen.yncrea.fr)
- *  - Tianyu Geng (tianyu.geng@isen.yncrea.fr)
+ *  - Kevin Guillemot (kevin.guillemot@advens.fr)
+ * With:
+ *  - Théo Bertin (theo.bertin@advens.fr)
  *
  * This file is part of rsyslog.
  *
@@ -172,10 +172,14 @@ static const char *get_type(uint16_t x) {
 	uint16_t len_types3 = (sizeof(dns_types3) / sizeof(char *)) - 1;
 	uint16_t len_types2 = (sizeof(dns_types2) / sizeof(char *)) - 1;
 	uint16_t len_types = (sizeof(dns_types) / sizeof(char *)) - 1;
-	if (x >= 32768 && x < 32768 + len_types3)
+	if (x >= 32768 && x < 32768 + len_types3) {
 		types = dns_types3;
-	else if (x >= 249 && x < 249 + len_types2)
+		x -= 32768;
+	}
+	else if (x >= 249 && x < 249 + len_types2) {
 		types = dns_types2;
+		x -= 249;
+	}
 	else if (x > 0 && x < len_types)
 		types = dns_types;
 	else
@@ -201,7 +205,6 @@ static const char *get_class(uint16_t x) {
 			return "QCLASS NONE";
 		case 255:
 			return "QCLASS *";
-			break;
 	}
 	return "UNKNOWN";
 }
@@ -220,7 +223,8 @@ static const char *get_class(uint16_t x) {
  *  or the ones after (as a list of bytes), and the length of this data.
 */
 data_ret_t *dns_parse(const uchar *packet, int pktSize, struct json_object *jparent) {
-	const uchar *svg_packet = packet;
+	const uchar *packet_ptr = packet;
+	const uchar *end_packet = packet + pktSize;
 	DBGPRINTF("dns_parse\n");
 	DBGPRINTF("packet size %d\n", pktSize);
 
@@ -231,13 +235,12 @@ data_ret_t *dns_parse(const uchar *packet, int pktSize, struct json_object *jpar
 	} union_short_int;
 
 	/* Get transaction id */
-	union_short_int.pckt = packet;
+	union_short_int.pckt = packet_ptr;
 	unsigned short int transaction_id = ntohs(*(union_short_int.two_bytes));
 	//DBGPRINTF("transaction_id = %02x \n", transaction_id);
-	packet += 2;
+	union_short_int.pckt += 2;
 
 	/* Get flags */
-	union_short_int.pckt = packet;
 	unsigned short int flags = ntohs(*(union_short_int.two_bytes));
 	//DBGPRINTF("flags = %02x \n", flags);
 
@@ -262,84 +265,89 @@ data_ret_t *dns_parse(const uchar *packet, int pktSize, struct json_object *jpar
 	unsigned short int reply_code = flags & 0b1111;
 	//DBGPRINTF("reply_code = %02x \n", reply_code);
 
-	packet += 2;
+	union_short_int.pckt += 2;
 
 	/* Get QDCOUNT */
-	union_short_int.pckt = packet;
 	unsigned short int query_count = ntohs(*(union_short_int.two_bytes));
 	//DBGPRINTF("query_count = %02x \n", query_count);
-	packet += 2;
+	union_short_int.pckt += 2;
 
 	/* Get ANCOUNT */
-	union_short_int.pckt = packet;
 	unsigned short int answer_count = ntohs(*(union_short_int.two_bytes));
 	//DBGPRINTF("answer_count = %02x \n", answer_count);
-	packet += 2;
+	union_short_int.pckt += 2;
 
 	/* Get NSCOUNT */
-	union_short_int.pckt = packet;
 	unsigned short int authority_count = ntohs(*(union_short_int.two_bytes));
 	//DBGPRINTF("authority_count = %02x \n", authority_count);
-	packet += 2;
+	union_short_int.pckt += 2;
 
 	/* Get ARCOUNT */
-	union_short_int.pckt = packet;
 	unsigned short int additionnal_count = ntohs(*(union_short_int.two_bytes));
 	//DBGPRINTF("additionnal_count = %02x \n", additionnal_count);
-	packet += 2;
+	union_short_int.pckt += 2;
+	packet_ptr = union_short_int.pckt;
 
 	fjson_object *queries = NULL;
 	if ((queries = json_object_new_array()) == NULL) {
-		DBGPRINTF("impcap::dns_parser: Cannot create new json array. Stopping.");
-		RETURN_DATA_AFTER((int)(packet - svg_packet))
+		DBGPRINTF("impcap::dns_parser: Cannot create new json array. Stopping.\n");
+		RETURN_DATA_AFTER(0)
 	}
 
-	// FOr each query of query_count
+	// For each query of query_count
 	int query_cpt = 0;
-	while (query_cpt < query_count && (int)(packet - svg_packet) < pktSize) {
-		if (strlen((const char *)packet) >= 256) {
-			DBGPRINTF("impcap::dns_parser: Length of domain queried is > 256. Stopping.");
-			RETURN_DATA_AFTER((int)(packet - svg_packet))
+	while (query_cpt < query_count && packet_ptr < end_packet) {
+		size_t query_size = strnlen((const char *)packet_ptr, (size_t)(end_packet - packet_ptr));
+		// Check if query is valid (max 255 bytes, plus a '\0')
+		if (query_size >= 256) {
+			DBGPRINTF("impcap::dns_parser: Length of domain queried is > 255. Stopping.\n");
+			break;
+		}
+		// Check if remaining data is enough to hold query + '\0' + 4 bytes (QTYPE and QCLASS fields)
+		if (query_size + 5 > (size_t)(end_packet - packet_ptr)) {
+			DBGPRINTF("impcap::dns_parser: packet size too small to parse query. Stopping.\n");
+			break;
 		}
 		fjson_object *query = NULL;
 		if ((query = json_object_new_object()) == NULL) {
-			DBGPRINTF("impcap::dns_parser: Cannot create new json object. Stopping.");
-			RETURN_DATA_AFTER((int)(packet - svg_packet))
+			DBGPRINTF("impcap::dns_parser: Cannot create new json object. Stopping.\n");
+			break;
 		}
 		char domain_query[256] = {0};
-		uchar nb_char = *packet;
-		packet++;
-		int cpt = 0;
-		while (*packet != '\0') {
+		uchar nb_char = *packet_ptr;
+		packet_ptr++;
+		size_t cpt = 0;
+		while (cpt + 1 < query_size) {
 			if (nb_char == 0) {
-				nb_char = *packet;
+				nb_char = *packet_ptr;
 				domain_query[cpt] = '.';
 			} else {
-				domain_query[cpt] = (char)*packet;
+				domain_query[cpt] = (char)*packet_ptr;
 				nb_char--;
 			}
 			cpt++;
-			packet++;
+			packet_ptr++;
 		}
 		domain_query[cpt] = '\0';
-		packet++; // pass the last \0
-		DBGPRINTF("Requested domain : '%s' \n", domain_query);
+		if (cpt)
+			packet_ptr++; // pass the last \0, only if query was not empty
+		// DBGPRINTF("Requested domain : '%s' \n", domain_query);
+
 		/* Register the name in dict */
 		json_object_object_add(query, "qname", json_object_new_string(domain_query));
 		/* Get QTYPE */
-		union_short_int.pckt = packet;
+		union_short_int.pckt = packet_ptr;
 		unsigned short int qtype = ntohs(*(union_short_int.two_bytes));
 		//DBGPRINTF("qtype = %02x \n", qtype);
 		json_object_object_add(query, "qtype", json_object_new_int((int)qtype));
 		json_object_object_add(query, "type", json_object_new_string(get_type(qtype)));
-		packet += 2;
+		union_short_int.pckt += 2;
 		/* Retrieve QCLASS */
-		union_short_int.pckt = packet;
 		unsigned short int qclass = ntohs(*(union_short_int.two_bytes));
 		//DBGPRINTF("qclass = %02x \n", qclass);
 		json_object_object_add(query, "qclass", json_object_new_int((int)qclass));
 		json_object_object_add(query, "class", json_object_new_string(get_class(qclass)));
-		packet += 2;
+		packet_ptr = union_short_int.pckt + 2;
 		/* Register the query in json array */
 		json_object_array_add(queries, query);
 		query_cpt++;

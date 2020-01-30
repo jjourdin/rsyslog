@@ -19,9 +19,8 @@
 . ${srcdir:=.}/diag.sh init
 generate_conf
 add_conf '
-$ModLoad ../plugins/imtcp/.libs/imtcp
-$MainMsgQueueTimeoutShutdown 10000
-$InputTCPServerRun '$TCPFLOOD_PORT'
+module(load="../plugins/imtcp/.libs/imtcp")
+input(type="imtcp" port="0" listenPortFileName="'$RSYSLOG_DYNNAME'.tcpflood_port")
 
 $template outfmt,"%msg:F,58:2%\n"
 :msg, contains, "msgnum:" |./'$RSYSLOG_DYNNAME'.pipe
@@ -33,5 +32,5 @@ tcpflood -m1000 -d500
 shutdown_when_empty # shut down rsyslogd when done processing messages
 wait_shutdown       # and wait for it to terminate
 # NO need to check seqno -- see header comment
-echo we did not loop, so the test is sucessfull
+echo we did not loop, so the test is successful
 exit_test

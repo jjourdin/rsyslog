@@ -13,5 +13,6 @@ action(type="omfile" file="'$RSYSLOG_OUT_LOG'")
 startup
 shutdown_when_empty
 wait_shutdown
+content_check 'imfile: no files configured'
 check_not_present 'parameter .* not known'
 exit_test

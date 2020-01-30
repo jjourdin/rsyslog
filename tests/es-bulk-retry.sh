@@ -1,14 +1,13 @@
 #!/bin/bash
 # This file is part of the rsyslog project, released under ASL 2.0
 . ${srcdir:=.}/diag.sh init
-
 export ES_PORT=19200
 export NUMMESSAGES=100
 override_test_timeout 120
 #export USE_VALGRIND="YES" # to enable this to run under valgrind
-
 download_elasticsearch
 prepare_elasticsearch
+
 # change settings to cause bulk rejection errors
 cat >> $dep_work_dir/es/config/elasticsearch.yml <<EOF
 thread_pool.bulk.queue_size: 1
@@ -114,7 +113,7 @@ curl -s -H 'Content-Type: application/json' -XPUT localhost:${ES_PORT:-19200}/rs
     }
   }
 }
-' | python -mjson.tool
+' | $PYTHON -mjson.tool
 #export RSYSLOG_DEBUG="debug nostdout noprintmutexaction"
 #export RSYSLOG_DEBUGLOG="debug.log"
 startup
@@ -125,6 +124,7 @@ fi
 success=50
 badarg=50
 injectmsg 0 $NUMMESSAGES
+./msleep 1500; cat $RSYSLOG_OUT_LOG # debuging - we sometimes miss 1 message
 wait_content '"response.success": 50' $RSYSLOG_DYNNAME.spool/es-stats.log
 shutdown_when_empty
 wait_shutdown
@@ -136,7 +136,7 @@ cleanup_elasticsearch
 
 if [ -f $RSYSLOG_DYNNAME.work ] ; then
 	< $RSYSLOG_DYNNAME.work  \
-	python -c '
+	$PYTHON -c '
 import sys,json
 records = int(sys.argv[1])
 extra_recs = open(sys.argv[2], "w")
@@ -175,7 +175,7 @@ else
 fi
 
 if [ -f ${RSYSLOG_DYNNAME}.spool/es-stats.log ] ; then
-	python < ${RSYSLOG_DYNNAME}.spool/es-stats.log -c '
+	$PYTHON < ${RSYSLOG_DYNNAME}.spool/es-stats.log -c '
 import sys,json
 success = int(sys.argv[1])
 badarg = int(sys.argv[2])

@@ -16,8 +16,7 @@ module(	load="../plugins/imtcp/.libs/imtcp"
 	StreamDriver.Name="ossl"
 	StreamDriver.Mode="1"
 	StreamDriver.AuthMode="anon" )
-input(	type="imtcp"
-	port="'$TCPFLOOD_PORT'" )
+input(type="imtcp" port="0" listenPortFileName="'$RSYSLOG_DYNNAME'.tcpflood_port")
 
 template(name="outfmt" type="string" string="%msg:F,58:2%\n")
 :msg, contains, "msgnum:" action(	type="omfile" 
@@ -26,7 +25,7 @@ template(name="outfmt" type="string" string="%msg:F,58:2%\n")
 '
 # Begin actual testcase
 startup
-tcpflood -p'$TCPFLOOD_PORT' -m$NUMMESSAGES -Ttls -x$srcdir/tls-certs/ca.pem -Z$srcdir/tls-certs/cert.pem -z$srcdir/tls-certs/key.pem
+tcpflood -p$TCPFLOOD_PORT -m$NUMMESSAGES -Ttls -x$srcdir/tls-certs/ca.pem -Z$srcdir/tls-certs/cert.pem -z$srcdir/tls-certs/key.pem
 wait_file_lines
 shutdown_when_empty
 wait_shutdown

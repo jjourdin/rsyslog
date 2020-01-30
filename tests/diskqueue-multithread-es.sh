@@ -7,7 +7,7 @@
 # happen in our test. So the DA worker pool thread is, depending on
 # timing, started and shut down multiple times. This is not a problem
 # indication!
-# The pstats disply is for manual review - it helps to see how many
+# The pstats display is for manual review - it helps to see how many
 # messages actually went to the DA queue.
 # Copyright (C) 2019-10-28 by Rainer Gerhards
 # This file is part of the rsyslog project, released under ASL 2.0
@@ -16,11 +16,7 @@ export ES_DOWNLOAD=elasticsearch-6.0.0.tar.gz
 export ES_PORT=19200
 export NUMMESSAGES=25000
 export QUEUE_EMPTY_CHECK_FUNC=es_shutdown_empty_check
-download_elasticsearch
-prepare_elasticsearch
-start_elasticsearch
-
-init_elasticsearch
+ensure_elasticsearch_ready
 generate_conf
 add_conf '
 global(workDirectory="'$RSYSLOG_DYNNAME'.spool")
@@ -53,5 +49,4 @@ echo FOR MANUAL REVIEW: pstats
 tail $RSYSLOG_DYNNAME.pstats | grep maxqsize
 es_getdata $NUMMESSAGES $ES_PORT
 seq_check
-cleanup_elasticsearch
 exit_test

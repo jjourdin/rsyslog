@@ -1,34 +1,28 @@
 #!/bin/bash
 # Copyright (C) 2011 by Rainer Gerhards
-# This file is part of the rsyslog project, released  under GPLv3
+# This file is part of the rsyslog project, released under ASL 2.0
 . ${srcdir:=.}/diag.sh init
-
-uname
-if [ $(uname) = "FreeBSD" ] ; then
-   echo "This test currently does not work on FreeBSD."
-   exit 77
-fi
-
+skip_platform "FreeBSD"  "This test does not work on FreeBSD - problems with os utility option switches"
 #
 # STEP1: start both instances and send 1000 messages.
 # Note: receiver is instance 1, sender instance 2.
 #
-# start up the instances. Note that the envrionment settings can be changed to
+# start up the instances. Note that the environment settings can be changed to
 # set instance-specific debugging parameters!
 #export RSYSLOG_DEBUG="debug nostdout"
 #export RSYSLOG_DEBUGLOG="log2"
 echo starting receiver
 generate_conf
-export PORT_RCVR="$(get_free_port)"
 add_conf '
-$ModLoad ../plugins/imtcp/.libs/imtcp
 # then SENDER sends to this port (not tcpflood!)
-$InputTCPServerRun '$PORT_RCVR'
+module(load="../plugins/imtcp/.libs/imtcp")
+input(type="imtcp" port="0" listenPortFileName="'$RSYSLOG_DYNNAME'.tcpflood_port" )
 
 $template outfmt,"%msg:F,58:2%\n"
 :msg, contains, "msgnum:" ./'$RSYSLOG_OUT_LOG';outfmt
 '
 startup
+export PORT_RCVR="$TCPFLOOD_PORT"
 #export RSYSLOG_DEBUG="debug nostdout"
 #export RSYSLOG_DEBUGLOG="log"
 #valgrind="valgrind"
@@ -36,10 +30,6 @@ echo starting sender
 generate_conf 2
 export TCPFLOOD_PORT="$(get_free_port)"
 add_conf '
-$ModLoad ../plugins/imtcp/.libs/imtcp
-# this listener is for message generation by the test framework!
-$InputTCPServerRun '$TCPFLOOD_PORT'
-
 $WorkDirectory '$RSYSLOG_DYNNAME'.spool
 $MainMsgQueueSize 2000
 $MainMsgQueueLowWaterMark 800
@@ -83,9 +73,19 @@ ls -l ${RSYSLOG_DYNNAME}.spool
 
 #
 # Step 3: restart receiver, wait that the sender drains its queue
+$InputTCPServerRun '$PORT_RCVR'
 #
 echo step 3
 #export RSYSLOG_DEBUGLOG="log2"
+generate_conf
+add_conf '
+# then SENDER sends to this port (not tcpflood!)
+module(load="../plugins/imtcp/.libs/imtcp")
+input(type="imtcp" port="'$PORT_RCVR'")
+
+$template outfmt,"%msg:F,58:2%\n"
+:msg, contains, "msgnum:" ./'$RSYSLOG_OUT_LOG';outfmt
+'
 startup
 echo waiting for sender to drain queue [may need a short while]
 wait_queueempty 2
@@ -96,7 +96,7 @@ echo file size to expect is $OLDFILESIZE
 
 #
 # Step 4: send new data. Queue files are not permitted to grow now
-# (but one file continous to exist).
+# (but one file continuous to exist).
 #
 echo step 4
 injectmsg2  11001 10
@@ -160,9 +160,8 @@ shutdown_when_empty
 wait_shutdown
 
 # now abort test if we need to (due to filesize predicate)
-if [ $NEWFILESIZE != $OLDFILESIZE ]
-then
-   exit 1
+if [ $NEWFILESIZE != $OLDFILESIZE ]; then
+	error_exit 1
 fi
 # do the final check
 seq_check 1 21010 -m 100

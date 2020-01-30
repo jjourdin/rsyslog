@@ -64,6 +64,7 @@ struct tcpsrv_s {
 	int iDrvrMode;		/**< mode of the stream driver to use */
 	int DrvrChkExtendedKeyUsage;		/**< if true, verify extended key usage in certs */
 	int DrvrPrioritizeSan;		/**< if true, perform stricter checking of names in certs */
+	int DrvrTlsVerifyDepth;		/**< Verify Depth for certificate chains */
 	uchar *gnutlsPriorityString;	/**< priority string for gnutls */
 	uchar *pszLstnPortFileName;	/**< File in which the dynamic port is written */
 	uchar *pszDrvrAuthMode;	/**< auth mode of the stream driver to use */
@@ -91,8 +92,8 @@ struct tcpsrv_s {
 	int bDisableLFDelim;	/**< if 1, standard LF frame delimiter is disabled (*very dangerous*) */
 	int discardTruncatedMsg;/**< discard msg part that has been truncated*/
 	sbool bPreserveCase;	/**< preserve case in fromhost */
-	int ratelimitInterval;
-	int ratelimitBurst;
+	unsigned int ratelimitInterval;
+	unsigned int ratelimitBurst;
 	tcps_sess_t **pSessions;/**< array of all of our sessions */
 	void *pUsr;		/**< a user-settable pointer (provides extensibility for "derived classes")*/
 	/* callbacks */
@@ -170,7 +171,7 @@ BEGINinterface(tcpsrv) /* name must also be changed in ENDinterface macro! */
 	/* added v11 -- rgerhards, 2011-05-09 */
 	rsRetVal (*SetKeepAlive)(tcpsrv_t*, int);
 	/* added v13 -- rgerhards, 2012-10-15 */
-	rsRetVal (*SetLinuxLikeRatelimiters)(tcpsrv_t *pThis, int interval, int burst);
+	rsRetVal (*SetLinuxLikeRatelimiters)(tcpsrv_t *pThis, unsigned int interval, unsigned int burst);
 	/* added v14 -- rgerhards, 2013-07-28 */
 	rsRetVal (*SetDfltTZ)(tcpsrv_t *pThis, uchar *dfltTZ);
 	/* added v15 -- rgerhards, 2013-09-17 */
@@ -192,8 +193,10 @@ BEGINinterface(tcpsrv) /* name must also be changed in ENDinterface macro! */
 	/* added v23 -- Options for stricter driver behavior, 2019-08-16 */
 	rsRetVal (*SetDrvrCheckExtendedKeyUsage)(tcpsrv_t *pThis, int ChkExtendedKeyUsage);
 	rsRetVal (*SetDrvrPrioritizeSAN)(tcpsrv_t *pThis, int prioritizeSan);
+	/* added v24 -- Options for TLS verify depth driver behavior, 2019-12-20 */
+	rsRetVal (*SetDrvrTlsVerifyDepth)(tcpsrv_t *pThis, int verifyDepth);
 ENDinterface(tcpsrv)
-#define tcpsrvCURR_IF_VERSION 23 /* increment whenever you change the interface structure! */
+#define tcpsrvCURR_IF_VERSION 24 /* increment whenever you change the interface structure! */
 /* change for v4:
  * - SetAddtlFrameDelim() added -- rgerhards, 2008-12-10
  * - SetInputName() added -- rgerhards, 2008-12-10

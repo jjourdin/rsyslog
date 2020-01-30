@@ -3,6 +3,8 @@
  * Docker API in order to stream all container logs available on a host. Will also
  * update relevant container metadata.
  *
+ * Copyright (C) 2018, 2019 the rsyslog project.
+ *
  * This file is part of rsyslog.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -220,7 +222,7 @@ DEFobjCurrIf(statsobj)
 statsobj_t *modStats;
 STATSCOUNTER_DEF(ctrSubmit, mutCtrSubmit)
 STATSCOUNTER_DEF(ctrLostRatelimit, mutCtrLostRatelimit)
-STATSCOUNTER_DEF(ctrCurlError, mutctrCurlError)
+STATSCOUNTER_DEF(ctrCurlError, mutCtrCurlError)
 
 const char* DFLT_dockerAPIUnixSockAddr  = "/var/run/docker.sock";
 const char* DFLT_dockerAPIAdd           = "http://localhost:2375";
@@ -328,15 +330,15 @@ dockerContLogsBufDestruct(docker_cont_logs_buf_t *pThis) {
 }
 
 static rsRetVal
-dockerContLogsBufWrite(docker_cont_logs_buf_t *pThis, const uchar *pdata, size_t write_size) {
+dockerContLogsBufWrite(docker_cont_logs_buf_t *const pThis, const uchar *const pdata, const size_t write_size) {
 	DEFiRet;
 
-	imdocker_buf_t *mem = pThis->buf;
+	imdocker_buf_t *const mem = pThis->buf;
 	if (mem->len + write_size + 1 > mem->data_size) {
-		uchar *pbuf=NULL;
-		if ((pbuf = realloc(mem->data, mem->len + write_size + 1)) == NULL) {
+		uchar *const pbuf = realloc(mem->data, mem->len + write_size + 1);
+		if(pbuf == NULL) {
 			LogError(errno, RS_RET_ERR, "%s() - realloc failed!\n", __FUNCTION__);
-			return RS_RET_OUT_OF_MEMORY;
+			ABORT_FINALIZE(RS_RET_OUT_OF_MEMORY);
 		}
 		mem->data = pbuf;
 		mem->data_size = mem->len+ write_size + 1;
@@ -352,7 +354,8 @@ dockerContLogsBufWrite(docker_cont_logs_buf_t *pThis, const uchar *pdata, size_t
 		pThis->bytes_remaining -= write_size;
 	}
 
-	return iRet;
+finalize_it:
+	RETiRet;
 }
 
 rsRetVal imdockerReqNew(imdocker_req_t **ppThis) {
@@ -739,7 +742,8 @@ dockerContLogReqsPrint(docker_cont_log_instances_t *pThis) {
 /* NOTE: not thread safe */
 static rsRetVal
 dockerContLogReqsAdd(docker_cont_log_instances_t *pThis,
-		docker_cont_logs_inst_t *pContLogsReqInst) {
+		docker_cont_logs_inst_t *pContLogsReqInst)
+{
 	DEFiRet;
 	if (!pContLogsReqInst) {
 		return RS_RET_ERR;
@@ -753,9 +757,11 @@ dockerContLogReqsAdd(docker_cont_log_instances_t *pThis,
 			if (!hashtable_insert(pThis->ht_container_log_insts, keyName, pContLogsReqInst)) {
 				ABORT_FINALIZE(RS_RET_ERR);
 			}
+			keyName = NULL;
 		}
 	}
 finalize_it:
+	free(keyName);
 	RETiRet;
 }
 
@@ -957,7 +963,7 @@ if (!loadModConf->getContainerLogOptionsWithoutTail) {
 	CHKiRet(statsobj.AddCounter(modStats, UCHAR_CONSTANT("ratelimit.discarded"),
 		ctrType_IntCtr, CTR_FLAG_RESETTABLE, &ctrLostRatelimit));
 
-	STATSCOUNTER_INIT(ctrCurlError, mutctrCurlError);
+	STATSCOUNTER_INIT(ctrCurlError, mutCtrCurlError);
 	CHKiRet(statsobj.AddCounter(modStats, UCHAR_CONSTANT("curl.errors"),
 		ctrType_IntCtr, CTR_FLAG_RESETTABLE, &ctrCurlError));
 

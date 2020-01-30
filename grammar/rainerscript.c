@@ -2,7 +2,7 @@
  *
  * Module begun 2011-07-01 by Rainer Gerhards
  *
- * Copyright 2011-2018 Rainer Gerhards and Others.
+ * Copyright 2011-2019 Rainer Gerhards and Others.
  *
  * This file is part of the rsyslog runtime library.
  *
@@ -1219,6 +1219,8 @@ nvlstGetParams(struct nvlst *lst, struct cnfparamblk *params,
 			for(val = lst; val != NULL ; val = val->next) {
 				val->bUsed = 1;
 			}
+		} else {
+			valnode->bUsed = 1;
 		}
 	}
 
@@ -3434,7 +3436,7 @@ initFunc_re_match(struct cnffunc *func)
 		}
 	} else { /* regexp object could not be loaded */
 		parser_errmsg("could not load regex support - regex ignored");
-		ABORT_FINALIZE(RS_RET_ERR);
+		ABORT_FINALIZE(localRet);
 	}
 
 finalize_it:

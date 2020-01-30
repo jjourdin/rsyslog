@@ -60,7 +60,7 @@ export TB_ERR_TIMEOUT=101
 
 # diag system internal environment variables
 # these variables are for use by test scripts - they CANNOT be
-# overriden by the user
+# overridden by the user
 # TCPFLOOD_EXTRA_OPTS   enables to set extra options for tcpflood, usually
 #                       used in tests that have a common driver where it
 #                       is too hard to set these options otherwise
@@ -81,7 +81,7 @@ export ZOOPIDFILE="$(pwd)/zookeeper.pid"
 TB_TIMEOUT_STARTSTOP=400 # timeout for start/stop rsyslogd in tenths (!) of a second 400 => 40 sec
 # note that 40sec for the startup should be sufficient even on very slow machines. we changed this from 2min on 2017-12-12
 TB_TEST_TIMEOUT=90  # number of seconds after which test checks timeout (eg. waits)
-TB_TEST_MAX_RUNTIME=${TEST_MAX_RUNTIME:-580} # maximum runtuime in seconds for a test;
+TB_TEST_MAX_RUNTIME=${TEST_MAX_RUNTIME:-580} # maximum runtime in seconds for a test;
 			# default TEST_MAX_RUNTIME e.g. for long-running tests or special
 			# testbench use. Testbench will abort test
 			# after that time (iff it has a chance to, not strictly enforced)
@@ -94,7 +94,7 @@ if [ "$TESTTOOL_DIR" == "" ]; then
 	export TESTTOOL_DIR="${srcdir:-.}"
 fi
 
-# newer functionality is preferrably introduced via bash functions
+# newer functionality is preferably introduced via bash functions
 # rgerhards, 2018-07-03
 rsyslog_testbench_test_url_access() {
     local missing_requirements=
@@ -169,7 +169,7 @@ test_status() {
 
 
 setvar_RS_HOSTNAME() {
-	printf '### Obtaining HOSTNAME (prequisite, not actual test) ###\n'
+	printf '### Obtaining HOSTNAME (prerequisite, not actual test) ###\n'
 	generate_conf ""
 	add_conf 'module(load="../plugins/imtcp/.libs/imtcp")
 input(type="imtcp" port="0" listenPortFileName="'$RSYSLOG_DYNNAME'.tcpflood_port")
@@ -193,6 +193,9 @@ local0.* ./'${RSYSLOG_DYNNAME}'.HOSTNAME;hostname
 #			finished under stress otherwise
 # $1 is the instance id, if given
 generate_conf() {
+	if [ "$RSTB_GLOBAL_QUEUE_SHUTDOWN_TIMEOUT" == "" ]; then
+		RSTB_GLOBAL_QUEUE_SHUTDOWN_TIMEOUT="10000"
+	fi
 	if [ "$RSTB_GLOBAL_INPUT_SHUTDOWN_TIMEOUT" == "" ]; then
 		RSTB_GLOBAL_INPUT_SHUTDOWN_TIMEOUT="60000"
 	fi
@@ -214,7 +217,9 @@ generate_conf() {
 global(inputs.timeout.shutdown="'$RSTB_GLOBAL_INPUT_SHUTDOWN_TIMEOUT'"
        default.action.queue.timeoutshutdown="'$RSTB_ACTION_DEFAULT_Q_TO_SHUTDOWN'"
        default.action.queue.timeoutEnqueue="'$RSTB_ACTION_DEFAULT_Q_TO_ENQUEUE'")
-$MainmsgQueueTimeoutEnqueue 20000 # use legacy-style so that we can override if needed
+# use legacy-style for the following settings so that we can override if needed
+$MainmsgQueueTimeoutEnqueue 20000
+$MainmsgQueueTimeoutShutdown '$RSTB_GLOBAL_QUEUE_SHUTDOWN_TIMEOUT'
 $IMDiagListenPortFileName '$RSYSLOG_DYNNAME.imdiag$1.port'
 $IMDiagServerRun 0
 $IMDiagAbortTimeout '$TB_TEST_MAX_RUNTIME'
@@ -275,7 +280,7 @@ startup_common() {
 	# we need to remove the imdiag port file as there are some
 	# tests that start multiple times. These may get the old port
 	# number if the file still exists AND timing is bad so that
-	# imdiag does not genenrate the port file quickly enough on
+	# imdiag does not generate the port file quickly enough on
 	# startup.
 	rm -f $RSYSLOG_DYNNAME.imdiag$instance.port
 	if [ ! -f $CONF_FILE ]; then
@@ -388,7 +393,7 @@ wait_file_exists() {
 # a generic check function and must only used with those kafka tests
 # that actually need it.
 kafka_wait_group_coordinator() {
-echo We are waiting for kafka/zookeper being ready to deliver messages
+echo We are waiting for kafka/zookeeper being ready to deliver messages
 wait_file_exists $RSYSLOG_OUT_LOG "
 
 Non-existence of $RSYSLOG_OUT_LOG can be caused
@@ -446,6 +451,7 @@ injectmsg_kafkacat() {
 	fi
 }
 
+
 # wait for rsyslogd startup ($1 is the instance)
 wait_startup() {
 	wait_rsyslog_startup_pid $1
@@ -478,6 +484,9 @@ wait_startup() {
 # functions that startup rsyslog
 reassign_ports() {
 	if grep -q 'listenPortFileName="'$RSYSLOG_DYNNAME'\.tcpflood_port"' $CONF_FILE; then
+		assign_tcpflood_port $RSYSLOG_DYNNAME.tcpflood_port
+	fi
+	if grep -q '$InputTCPServerListenPortFile.*\.tcpflood_port' $CONF_FILE; then
 		assign_tcpflood_port $RSYSLOG_DYNNAME.tcpflood_port
 	fi
 }
@@ -515,6 +524,33 @@ assign_tcpflood_port() {
 	echo "TCPFLOOD_PORT now: $TCPFLOOD_PORT"
 	if [ "$TCPFLOOD_PORT" == "" ]; then
 		echo "TESTBENCH ERROR: TCPFLOOD_PORT not found!"
+		ls -l $RSYSLOG_DYNNAME*
+		exit 100
+	fi
+}
+
+
+# assign TCPFLOOD_PORT2 from port file
+# $1 - port file
+assign_tcpflood_port2() {
+	wait_file_exists "$1"
+	export TCPFLOOD_PORT2=$(cat "$1")
+	echo "TCPFLOOD_PORT2 now: $TCPFLOOD_PORT2"
+	if [ "$TCPFLOOD_PORT2" == "" ]; then
+		echo "TESTBENCH ERROR: TCPFLOOD_PORT2 not found!"
+		ls -l $RSYSLOG_DYNNAME*
+		exit 100
+	fi
+}
+# assign RS_PORT from port file - this is meant as generic way to
+# obtain additional port variables
+# $1 - port file
+assign_rs_port() {
+	wait_file_exists "$1"
+	export RS_PORT=$(cat "$1")
+	echo "RS_PORT now: $RS_PORT"
+	if [ "$RS_PORT" == "" ]; then
+		echo "TESTBENCH ERROR: RS_PORT not found!"
 		ls -l $RSYSLOG_DYNNAME*
 		exit 100
 	fi
@@ -597,6 +633,18 @@ injectmsg2() {
 	echo injecting $2 messages
 	echo injectmsg "$1" "$2" $3 $4 | $TESTTOOL_DIR/diagtalker -p$IMDIAG_PORT2 || error_exit  $?
 	# TODO: some return state checking? (does it really make sense here?)
+}
+
+# inject literal payload  via our inject interface (imdiag)
+injectmsg_literal() {
+	printf 'injecting msg payload: %s\n' "$1"
+	sed -e 's/^/injectmsg literal /g' <<< "$1" | $TESTTOOL_DIR/diagtalker -p$IMDIAG_PORT || error_exit $?
+}
+
+# inject literal payload  via our inject interface (imdiag)
+injectmsg_file() {
+	printf 'injecting msg payload: %s\n' "$1"
+	sed -e 's/^/injectmsg literal /g' < "$1" | $TESTTOOL_DIR/diagtalker -p$IMDIAG_PORT || error_exit $?
 }
 
 
@@ -913,7 +961,7 @@ await_lookup_table_reload() {
 
 # $1 filename, default $RSYSLOG_OUT_LOG
 # $2 expected nbr of lines, default $NUMMESSAGES
-# $3 timout in seconds
+# $3 timeout in seconds
 # options (need to be specified in THIS ORDER if multiple given):
 # --delay ms              -- if given, delay to use between retries
 # --abort-on-oversize     -- error_exit if more lines than expected are present
@@ -1159,7 +1207,7 @@ do_cleanup() {
 # our $1 is the to-be-used exit code. if $2 is "stacktrace", call gdb.
 #
 # NOTE: if a function test_error_exit_handler is defined, error_exit will
-#       call it immeditely before termination. This may be used to cleanup
+#       call it immediately before termination. This may be used to cleanup
 #       some things or emit additional diagnostic information.
 error_exit() {
 	if [ $1 -eq $TB_ERR_TIMEOUT ]; then
@@ -1188,6 +1236,14 @@ error_exit() {
 				thread apply all bt full
 				q
 				EOF
+			$SUDO gdb ./tcpflood "$CORE" -batch <<- EOF
+				bt
+				echo === THREAD INFO ===
+				info thread
+				echo === thread apply all bt full ===
+				thread apply all bt full
+				q
+				EOF
 		fi
 	fi
 	if [[ ! -e IN_AUTO_DEBUG &&  "$USE_AUTO_DEBUG" == 'on' ]]; then
@@ -1206,7 +1262,7 @@ error_exit() {
 		RSYSLOG_DEBUG=$RSYSLOG_DEBUG_SAVE
 		rm IN_AUTO_DEBUG
 	fi
-	# output listening ports as a temporay debug measure (2018-09-08 rgerhards), now disables, but not yet removed (2018-10-22)
+	# output listening ports as a temporary debug measure (2018-09-08 rgerhards), now disables, but not yet removed (2018-10-22)
 	#if [ $(uname) == "Linux" ]; then
 	#	netstat -tlp
 	#else
@@ -1260,16 +1316,16 @@ error_stats() {
 		printf 'not reporting failure as RSYSLOG_STATSURL is not set\n'
 	else
 		echo reporting failure to $RSYSLOG_STATSURL
-		testname=$($srcdir/urlencode.py "$RSYSLOG_TESTNAME")
-		testenv=$($srcdir/urlencode.py "${VCS_SLUG:-$PWD}")
-		testmachine=$($srcdir/urlencode.py "$HOSTNAME")
-		logurl=$($srcdir/urlencode.py "${CI_BUILD_URL:-}")
+		testname=$($PYTHON $srcdir/urlencode.py "$RSYSLOG_TESTNAME")
+		testenv=$($PYTHON $srcdir/urlencode.py "${VCS_SLUG:-$PWD}")
+		testmachine=$($PYTHON $srcdir/urlencode.py "$HOSTNAME")
+		logurl=$($PYTHON $srcdir/urlencode.py "${CI_BUILD_URL:-}")
 		wget -nv -O/dev/null $RSYSLOG_STATSURL\?Testname=$testname\&Testenv=$testenv\&Testmachine=$testmachine\&exitcode=${1:-1}\&logurl=$logurl\&rndstr=jnxv8i34u78fg23
 	fi
 }
 
 # do the usual sequence check to see if everything was properly received.
-# $4... are just to have the abilit to pass in more options...
+# $4... are just to have the ability to pass in more options...
 # add -v to chkseq if you need more verbose output
 # argument --check-only can be used to simply do a check without abort in fail case
 # env var SEQ_CHECK_FILE permits to override file name to check
@@ -1304,9 +1360,9 @@ seq_check() {
 		error_exit 1
 	fi
 	if [ "${SEQ_CHECK_FILE##*.}" == "gz" ]; then
-		gunzip -c "${SEQ_CHECK_FILE}" | $RS_SORTCMD $RS_SORT_NUMERIC_OPT | ./chkseq -s$startnum -e$endnum $3 $4 $5 $6 $7
+		gunzip -c "${SEQ_CHECK_FILE}" | $RS_SORTCMD $RS_SORT_NUMERIC_OPT | ./chkseq -s$startnum -e$endnum $3 $4 $5 $6 $7 $SEQ_CHECK_OPTIONS
 	else
-		$RS_SORTCMD $RS_SORT_NUMERIC_OPT < "${SEQ_CHECK_FILE}" | ./chkseq -s$startnum -e$endnum $3 $4 $5 $6 $7 $SEQ_CHEKC_OPTIONS
+		$RS_SORTCMD $RS_SORT_NUMERIC_OPT < "${SEQ_CHECK_FILE}" | ./chkseq -s$startnum -e$endnum $3 $4 $5 $6 $7 $SEQ_CHECK_OPTIONS
 	fi
 	ret=$?
 	if [ "$check_only"  == "YES" ]; then
@@ -1315,7 +1371,7 @@ seq_check() {
 	if [ $ret -ne 0 ]; then
 		if [ "${SEQ_CHECK_FILE##*.}" == "gz" ]; then
 			gunzip -c "${SEQ_CHECK_FILE}" | $RS_SORTCMD $RS_SORT_NUMERIC_OPT \
-				| ./chkseq -s$startnum -e$endnum $3 $4 $5 $6 $7 \
+				| ./chkseq -s$startnum -e$endnum $3 $4 $5 $6 $7 $SEQ_CHECK_OPTIONS \
 				> $RSYSLOG_DYNNAME.error.log
 		else
 			$RS_SORTCMD $RS_SORT_NUMERIC_OPT < ${SEQ_CHECK_FILE} \
@@ -1343,7 +1399,7 @@ seq_check() {
 # do the usual sequence check to see if everything was properly received. This is
 # a duplicateof seq-check, but we could not change its calling conventions without
 # breaking a lot of exitings test cases, so we preferred to duplicate the code here.
-# $4... are just to have the abilit to pass in more options...
+# $4... are just to have the ability to pass in more options...
 # add -v to chkseq if you need more verbose output
 seq_check2() {
 	$RS_SORTCMD $RS_SORT_NUMERIC_OPT < ${RSYSLOG2_OUT_LOG}  | ./chkseq -s$1 -e$2 $3 $4 $5 $6 $7
@@ -1355,7 +1411,7 @@ seq_check2() {
 
 
 # do the usual sequence check, but for gzip files
-# $4... are just to have the abilit to pass in more options...
+# $4... are just to have the ability to pass in more options...
 gzip_seq_check() {
 	if [ "$1" == "" ]; then
 		if [ "$NUMMESSAGES" == "" ]; then
@@ -1437,7 +1493,7 @@ exit_test() {
 	# Extended Exit handling for kafka / zookeeper instances 
 	kafka_exit_handling "true"
 
-	printf '%s Test %s SUCCESFUL (took %s seconds)\n' "$(tb_timestamp)" "$0" "$(( $(date +%s) - TB_STARTTEST ))"
+	printf '%s Test %s SUCCESSFUL (took %s seconds)\n' "$(tb_timestamp)" "$0" "$(( $(date +%s) - TB_STARTTEST ))"
 	echo  -------------------------------------------------------------------------------
 	exit 0
 }
@@ -1448,7 +1504,7 @@ exit_test() {
 # to work pretty well. In any case, we should probably call this as
 # late as possible before the usage of the port.
 get_free_port() {
-python -c 'import socket; s=socket.socket(); s.bind(("", 0)); print(s.getsockname()[1]); s.close()'
+$PYTHON -c 'import socket; s=socket.socket(); s.bind(("", 0)); print(s.getsockname()[1]); s.close()'
 }
 
 
@@ -1458,7 +1514,7 @@ get_inode() {
 		printf 'FAIL: file "%s" does not exist in get_inode\n' "$1"
 		error_exit 100
 	fi
-	python -c 'import os; import stat; print(os.lstat("'$1'")[stat.ST_INO])'
+	$PYTHON -c 'import os; import stat; print(os.lstat("'$1'")[stat.ST_INO])'
 }
 
 
@@ -1510,19 +1566,24 @@ presort() {
 
 #START: ext kafka config
 #dep_cache_dir=$(readlink -f .dep_cache)
+export RS_ZK_DOWNLOAD=zookeeper-3.4.14.tar.gz
 dep_cache_dir=$(pwd)/.dep_cache
-dep_zk_url=http://www-us.apache.org/dist/zookeeper/zookeeper-3.4.14/zookeeper-3.4.14.tar.gz
-dep_zk_cached_file=$dep_cache_dir/zookeeper-3.4.14.tar.gz
+dep_zk_url=http://www-us.apache.org/dist/zookeeper/zookeeper-3.4.14/$RS_ZK_DOWNLOAD
+dep_zk_cached_file=$dep_cache_dir/$RS_ZK_DOWNLOAD
 
+export RS_KAFKA_DOWNLOAD=kafka_2.12-2.2.0.tgz
 dep_kafka_url=http://www-us.apache.org/dist/kafka/2.2.0/kafka_2.12-2.2.0.tgz
-dep_kafka_cached_file=$dep_cache_dir/kafka_2.12-2.2.0.tgz
+dep_kafka_cached_file=$dep_cache_dir/$RS_KAFKA_DOWNLOAD
 
 if [ -z "$ES_DOWNLOAD" ]; then
 	export ES_DOWNLOAD=elasticsearch-5.6.9.tar.gz
 fi
+if [ -z "$ES_PORT" ]; then
+	export ES_PORT=19200
+fi
 dep_es_cached_file="$dep_cache_dir/$ES_DOWNLOAD"
 
-# kafaka (including Zookeeper)
+# kafka (including Zookeeper)
 dep_kafka_dir_xform_pattern='s#^[^/]\+#kafka#g'
 dep_zk_dir_xform_pattern='s#^[^/]\+#zk#g'
 dep_es_dir_xform_pattern='s#^[^/]\+#es#g'
@@ -1568,29 +1629,39 @@ download_kafka() {
 		mkdir $dep_cache_dir
 	fi
 	if [ ! -f $dep_zk_cached_file ]; then
-		echo "Downloading zookeeper"
-		wget -q $dep_zk_url -O $dep_zk_cached_file
-		if [ $? -ne 0 ]
-		then
-			echo error during wget, retry:
-			wget $dep_zk_url -O $dep_zk_cached_file
+		if [ -f /local_dep_cache/$RS_ZK_DOWNLOAD ]; then
+			printf 'Zookeeper: satisfying dependency %s from system cache.\n' "$RS_ZK_DOWNLOAD"
+			cp /local_dep_cache/$RS_ZK_DOWNLOAD $dep_zk_cached_file
+		else
+			echo "Downloading zookeeper"
+			wget -q $dep_zk_url -O $dep_zk_cached_file
 			if [ $? -ne 0 ]
 			then
-				error_exit 1
+				echo error during wget, retry:
+				wget $dep_zk_url -O $dep_zk_cached_file
+				if [ $? -ne 0 ]
+				then
+					error_exit 1
+				fi
 			fi
 		fi
 	fi
 	if [ ! -f $dep_kafka_cached_file ]; then
-		echo "Downloading kafka"
-		wget -q $dep_kafka_url -O $dep_kafka_cached_file
-		if [ $? -ne 0 ]
-		then
-			echo error during wget, retry:
-			wget $dep_kafka_url -O $dep_kafka_cached_file
+		if [ -f /local_dep_cache/$RS_KAFKA_DOWNLOAD ]; then
+			printf 'Kafka: satisfying dependency %s from system cache.\n' "$RS_KAFKA_DOWNLOAD"
+			cp /local_dep_cache/$RS_KAFKA_DOWNLOAD $dep_kafka_cached_file
+		else
+			echo "Downloading kafka"
+			wget -q $dep_kafka_url -O $dep_kafka_cached_file
 			if [ $? -ne 0 ]
 			then
-				rm $dep_kafka_cached_file # a 0-size file may be left over
-				error_exit 1
+				echo error during wget, retry:
+				wget $dep_kafka_url -O $dep_kafka_cached_file
+				if [ $? -ne 0 ]
+				then
+					rm $dep_kafka_cached_file # a 0-size file may be left over
+					error_exit 1
+				fi
 			fi
 		fi
 	fi
@@ -1640,7 +1711,7 @@ stop_kafka() {
 		done
 		
 		if [[ "$2" == 'true' ]]; then
-			# Prozess shutdown, do cleanup now
+			# Process shutdown, do cleanup now
 			cleanup_kafka $1
 		fi
 	fi
@@ -1705,7 +1776,7 @@ stop_zookeeper() {
 		fi
 
 		if [[ "$2" == 'true' ]]; then
-			# Prozess shutdown, do cleanup now
+			# Process shutdown, do cleanup now
 			cleanup_zookeeper $1
 		fi
 		rm "$ZOOPIDFILE"
@@ -1724,10 +1795,10 @@ cleanup_zookeeper() {
 start_zookeeper() {
 	if [ "$KEEP_KAFKA_RUNNING" == "YES" ] && [ -f "$ZOOPIDFILE" ]; then
 		if kill -0 "$(cat "$ZOOPIDFILE")"; then
-			printf 'zookeeper already runing, no need to start\n'
+			printf 'zookeeper already running, no need to start\n'
 			return
 		else
-			printf 'INFO: zookeper pidfile %s exists, but zookeeper not runing\n' "$ZOOPIDFILE"
+			printf 'INFO: zookeeper pidfile %s exists, but zookeeper not running\n' "$ZOOPIDFILE"
 			printf 'deleting pid file\n'
 			rm -f "$ZOOPIDFILE"
 		fi
@@ -1764,6 +1835,7 @@ start_kafka() {
 	printf '%s starting kafka\n' "$(tb_timestamp)"
 
 	# Force IPv4 usage of Kafka!
+	export KAFKA_HEAP_OPTS="-Xms256m -Xmx256m" # we need to take care for smaller CI systems!
 	export KAFKA_OPTS="-Djava.net.preferIPv4Stack=True"
 	if [ "x$1" == "x" ]; then
 		dep_work_dir=$(readlink -f .dep_wrk)
@@ -1776,7 +1848,7 @@ start_kafka() {
 	# shellcheck disable=SC2009  - we do not grep on the process name!
 	kafkapid=$(ps aux | grep -i $dep_work_kafka_config | grep java | grep -v grep | awk '{print $2}')
 	if [ "$KEEP_KAFKA_RUNNING" == "YES" ] && [ "$kafkapid" != "" ]; then
-		printf 'kafka already runing, no need to start\n'
+		printf 'kafka already running, no need to start\n'
 		return
 	fi
 
@@ -1815,6 +1887,11 @@ start_kafka() {
 			echo "Kafka instance $dep_work_kafka_config (PID $kafkapid) started ... "
 		else
 			echo "Failed to start Kafka instance for $dep_work_kafka_config"
+			echo "displaying all kafka logs now:"
+			for logfile in $dep_work_dir/logs/*; do
+				echo "FILE: $logfile"
+				cat $logfile
+			done
 			error_exit 77
 		fi
 	fi
@@ -1971,7 +2048,7 @@ download_elasticsearch() {
 }
 
 
-# prepare eleasticsearch execution environment
+# prepare elasticsearch execution environment
 # this also stops any previous elasticsearch instance, if found
 prepare_elasticsearch() {
 	stop_elasticsearch # stop if it is still running
@@ -2018,6 +2095,27 @@ prepare_elasticsearch() {
 }
 
 
+# ensure that a basic, suitable instance of elasticsearch is running. This is part
+# of an effort to avoid restarting elasticsearch more often than necessary.
+ensure_elasticsearch_ready() {
+	if   printf '%s:%s:%s\n' "$ES_DOWNLOAD" "$ES_PORT" "$(cat es.pid)" \
+	   | cmp -b - elasticsearch.running
+	then
+		printf 'Elasticsearch already running, NOT restarting it\n'
+	else
+		cat elasticsearch.running
+		cleanup_elasticsearch
+		dep_es_cached_file="$dep_cache_dir/$ES_DOWNLOAD"
+		download_elasticsearch
+		prepare_elasticsearch
+		start_elasticsearch
+		printf '%s:%s:%s\n' "$ES_DOWNLOAD" "$ES_PORT" "$(cat es.pid)" > elasticsearch.running
+	fi
+	printf 'running elasticsearch instance: %s\n' "$(cat elasticsearch.running)"
+	init_elasticsearch
+}
+
+
 # $2, if set, is the number of additional ES instances
 start_elasticsearch() {
 	# Heap Size (limit to 128MB for testbench! defaults is way to HIGH)
@@ -2054,12 +2152,12 @@ start_elasticsearch() {
 }
 
 # read data from ES to a local file so that we can process
-# $1 - number of records (ES does not return all records unless you tell it explicitely).
+# $1 - number of records (ES does not return all records unless you tell it explicitly).
 # $2 - ES port
 es_getdata() {
 	curl --silent -XPUT --show-error -H 'Content-Type: application/json' "http://localhost:${2:-$ES_PORT}/rsyslog_testbench/_settings" -d '{ "index" : { "max_result_window" : '${1:-$NUMMESSAGES}' } }'
 	curl --silent localhost:${2:-$ES_PORT}/rsyslog_testbench/_search?size=${1:-$NUMMESSAGES} > $RSYSLOG_DYNNAME.work
-	python $srcdir/es_response_get_msgnum.py > ${RSYSLOG_OUT_LOG}
+	$PYTHON $srcdir/es_response_get_msgnum.py > ${RSYSLOG_OUT_LOG}
 }
 
 # a standard method to support shutdown & queue empty check for a wide range
@@ -2080,6 +2178,7 @@ es_shutdown_empty_check() {
 stop_elasticsearch() {
 	dep_work_dir=$(readlink -f $srcdir)
 	dep_work_es_pidfile="es.pid"
+	rm elasticsearch.running
 	if [ -e $dep_work_es_pidfile ]; then
 		es_pid=$(cat $dep_work_es_pidfile)
 		printf 'stopping ES with pid %d\n' $es_pid
@@ -2127,7 +2226,7 @@ omhttp_start_server() {
 
     server_args="-p $omhttp_server_port ${*:2}"
 
-    python ${omhttp_server_py} ${server_args} >> ${omhttp_server_logfile} 2>&1 &
+    timeout 30m $PYTHON ${omhttp_server_py} ${server_args} >> ${omhttp_server_logfile} 2>&1 &
     if [ ! $? -eq 0 ]; then
         echo "Failed to start omhttp test server."
         rm -rf $omhttp_work_dir
@@ -2182,6 +2281,10 @@ omhttp_get_data() {
             # dat = ['{"records":[{"value":{"msgnum":"1"}},{"value":{"msgnum":"2"}}]}',
             #        '{"records":[{"value":{"msgnum":"3"}},{"value":{"msgnum":"4"}}]}']
             python_parse="$python_init; out = [l['value']['msgnum'] for a in dat for l in json.loads(a)['records']]; $python_print"
+        elif [ "x$3" == "xlokirest" ]; then
+            # dat = ['{"streams":[{"msgnum":"1"},{"msgnum":"2"}]}',
+            #        '{"streams":[{"msgnum":"3"},{"msgnum":"4"}]}']
+            python_parse="$python_init; out = [l['msgnum'] for a in dat for l in json.loads(a)['streams']]; $python_print"
         else
             # use newline parsing as default
             python_parse="$python_init; out = [json.loads(l)['msgnum'] for a in dat for l in a.split('\n')]; $python_print"
@@ -2191,8 +2294,41 @@ omhttp_get_data() {
     
     omhttp_url="localhost:${omhttp_server_port}/${omhttp_path}"
     curl -s ${omhttp_url} \
-        | python -c "${python_parse}" | sort -n \
+        | $PYTHON -c "${python_parse}" | sort -n \
         > ${RSYSLOG_OUT_LOG}
+}
+
+
+# prepare MySQL for next test
+# each test receives its own database so that we also can run in parallel
+mysql_prep_for_test() {
+	mysql -u rsyslog --password=testbench -e "CREATE DATABASE $RSYSLOG_DYNNAME; "
+	mysql -u rsyslog --password=testbench --database $RSYSLOG_DYNNAME \
+		-e "CREATE TABLE SystemEvents (ID int unsigned not null auto_increment primary key, CustomerID bigint,ReceivedAt datetime NULL,DeviceReportedTime datetime NULL,Facility smallint NULL,Priority smallint NULL,FromHost varchar(60) NULL,Message text,NTSeverity int NULL,Importance int NULL,EventSource varchar(60),EventUser varchar(60) NULL,EventCategory int NULL,EventID int NULL,EventBinaryData text NULL,MaxAvailable int NULL,CurrUsage int NULL,MinUsage int NULL,MaxUsage int NULL,InfoUnitID int NULL,SysLogTag varchar(60),EventLogType varchar(60),GenericFileName VarChar(60),SystemID int NULL); CREATE TABLE SystemEventsProperties (ID int unsigned not null auto_increment primary key,SystemEventID int NULL,ParamName varchar(255) NULL,ParamValue text NULL);"
+	mysql --user=rsyslog --password=testbench --database $RSYSLOG_DYNNAME \
+		-e "truncate table SystemEvents;"
+	# TEST ONLY:
+	#mysql -s --user=rsyslog --password=testbench --database $RSYSLOG_DYNNAME \
+		#-e "select substring(Message,9,8) from SystemEvents;"
+	# END TEST
+	printf 'mysql ready for test, database: %s\n' $RSYSLOG_DYNNAME
+}
+
+# get data from mysql DB so that we can do seq_check on it.
+mysql_get_data() {
+	# note "-s" is required to suppress the select "field header"
+	mysql -s --user=rsyslog --password=testbench --database $RSYSLOG_DYNNAME \
+		-e "select substring(Message,9,8) from SystemEvents;" \
+		> $RSYSLOG_OUT_LOG 2> "$RSYSLOG_DYNNAME.mysqlerr"
+	grep -iv "Using a password on the command line interface can be insecure." < "$RSYSLOG_DYNNAME.mysqlerr"
+}
+
+# cleanup any temp data from mysql test
+# if we do not do this, we may run out of disk space
+# especially in container environment.
+mysql_cleanup_test() {
+	mysql --user=rsyslog --password=testbench -e "drop database $RSYSLOG_DYNNAME;" \
+		2>&1 | grep -iv "Using a password on the command line interface can be insecure."
 }
 
 
@@ -2201,14 +2337,6 @@ omhttp_get_data() {
 # $3 - file name
 # $4 - expected value
 first_column_sum_check() {
-	set -x
-	echo grep:
-	grep "$2" < "$3"
-	echo sed:
-	grep "$2" < "$3" | sed -e "$1"
-	echo akw:
-	grep "$2" < "$3" | sed -e "$1" | awk '{s+=$1} END {print s}'
-	set +x
 	sum=$(grep "$2" < "$3" | sed -e "$1" | awk '{s+=$1} END {print s}')
 	if [ "x${sum}" != "x$4" ]; then
 	    printf '\n============================================================\n'
@@ -2219,8 +2347,113 @@ first_column_sum_check() {
 	fi
 }
 
+#
+# Helper functions to start/stop python snmp trap receiver
+#
+snmp_start_trapreceiver() {
+    # Args: 1=port 2=outputfilename
+    # Args 2 and up are passed along as is to snmptrapreceiver.py
+    snmptrapreceiver=$srcdir/snmptrapreceiver.py
+    if [ ! -f ${snmptrapreceiver} ]; then
+        echo "Cannot find ${snmptrapreceiver} for omsnmp test"
+        error_exit 1
+    fi
+
+    if [ "x$1" == "x" ]; then
+        snmp_server_port="10162"
+    else
+        snmp_server_port="$1"
+    fi
+
+    if [ "x$2" == "x" ]; then
+        output_file="${RSYSLOG_DYNNAME}.snmp.out"
+    else
+        output_file="$2"
+    fi
+
+    # Create work directory for parallel tests
+    snmp_work_dir=${RSYSLOG_DYNNAME}/snmptrapreceiver
+
+    snmp_server_pidfile="${snmp_work_dir}/snmp_server.pid"
+    snmp_server_logfile="${snmp_work_dir}/snmp_server.log"
+    mkdir -p ${snmp_work_dir}
+
+    server_args="${snmp_server_port} 127.0.0.1 ${output_file}"
+
+    $PYTHON ${snmptrapreceiver} ${server_args} ${snmp_server_logfile} >> ${snmp_server_logfile} 2>&1 &
+    if [ ! $? -eq 0 ]; then
+        echo "Failed to start snmptrapreceiver."
+        rm -rf ${snmp_work_dir}
+        error_exit 1
+    fi
+
+    snmp_server_pid=$!
+    echo ${snmp_server_pid} > ${snmp_server_pidfile}
+
+    while test ! -s "${snmp_server_logfile}"; do
+	$TESTTOOL_DIR/msleep 100 # wait 100 milliseconds
+	if [ $(date +%s) -gt $(( TB_STARTTEST + TB_TEST_MAX_RUNTIME )) ]; then
+	   printf '%s ABORT! Timeout waiting on startup (pid file %s)\n' "$(tb_timestamp)" "$1"
+	   ls -l "$1"
+	   ps -fp $(cat "$1")
+	   snmp_stop_trapreceiver
+	   error_exit 1
+#	else 
+#	   echo "waiting...${snmp_server_logfile}..."
+	fi
+    done
+
+    echo "Started snmptrapreceiver with args ${server_args} with pid ${snmp_server_pid}"
+}
+
+snmp_stop_trapreceiver() {
+    # Args: None
+    snmp_work_dir=${RSYSLOG_DYNNAME}/snmptrapreceiver
+    if [ ! -d ${snmp_work_dir} ]; then
+        echo "snmptrapreceiver server ${snmp_work_dir} does not exist, no action needed"
+    else
+        echo "Stopping snmptrapreceiver server"
+        kill -9 $(cat ${snmp_work_dir}/snmp_server.pid) > /dev/null 2>&1
+        # Done at testexit already!: rm -rf ${snmp_work_dir}
+    fi
+}
+
+wait_for_stats_flush() {
+	echo "will wait for stats push"
+	emitmsg=0
+	while [[ ! -f $1 ]]; do
+		if [ $((++emitmsg % 10)) == 0 ]; then
+			echo waiting for stats file "'$1'" to be created
+		fi
+		$TESTTOOL_DIR/msleep 100
+	done
+	prev_count=$(grep -c 'BEGIN$' <$1)
+	new_count=$prev_count
+	start_loop="$(date +%s)"
+	emit_waiting=0
+	while [[ "x$prev_count" == "x$new_count" ]]; do
+		# busy spin, because it allows as close timing-coordination
+		# in actual test run as possible
+		if [ $(date +%s) -gt $(( TB_STARTTEST + TB_TEST_MAX_RUNTIME )) ]; then
+		   printf '%s ABORT! Timeout waiting on stats push\n' "$(tb_timestamp)" "$1"
+		   error_exit 1
+		else
+		   # waiting for 1000 is heuristically "sufficiently but not too
+		   # frequent" enough
+		   if [ $((++emit_waiting)) == 1000 ]; then
+		      printf 'still waiting for stats push...\n'
+		      emit_waiting=0
+		   fi
+		 fi
+		new_count=$(grep -c 'BEGIN$' <"$1")
+	done
+	echo "stats push registered"
+}
+
+
 case $1 in
    'init')	$srcdir/killrsyslog.sh # kill rsyslogd if it runs for some reason
+		source set-envvars
 		# for (solaris) load debugging, uncomment next 2 lines:
 		#export LD_DEBUG=all
 		#ldd ../tools/rsyslogd
@@ -2250,16 +2483,16 @@ case $1 in
 		fi
 		if [ "$RSYSLOG_DYNNAME" != "" ]; then
 			echo "FAIL: \$RSYSLOG_DYNNAME already set in init"
-			echo "hint: was init accidently called twice?"
+			echo "hint: was init accidentally called twice?"
 			exit 2
 		fi
 		export RSYSLOG_DYNNAME="rstb_$(./test_id $(basename $0))"
 		export RSYSLOG_OUT_LOG="${RSYSLOG_DYNNAME}.out.log"
 		export RSYSLOG2_OUT_LOG="${RSYSLOG_DYNNAME}_2.out.log"
 		export RSYSLOG_PIDBASE="${RSYSLOG_DYNNAME}:" # also used by instance 2!
-		export IMDIAG_PORT=13500
-		export IMDIAG_PORT2=13501
-		export TCPFLOOD_PORT=13514
+		#export IMDIAG_PORT=13500 DELETE ME
+		#export IMDIAG_PORT2=13501 DELETE ME
+		#export TCPFLOOD_PORT=13514 DELETE ME
 
 		# Extra Variables for Test statistic reporting
 		export RSYSLOG_TESTNAME=$(basename $0)
@@ -2307,7 +2540,7 @@ case $1 in
 		# happens in chained test scripts. Delete on exit is fine,
 		# though.
 		# note: TCPFLOOD_EXTRA_OPTS MUST NOT be unset in init, because
-		# some tests need to set it BEFORE calling init to accomodate
+		# some tests need to set it BEFORE calling init to accommodate
 		# their generic test drivers.
 		if [ "$TCPFLOOD_EXTRA_OPTS" != '' ] ; then
 		        echo TCPFLOOD_EXTRA_OPTS set: $TCPFLOOD_EXTRA_OPTS
@@ -2336,23 +2569,6 @@ case $1 in
    'kill-immediate') # kill rsyslog unconditionally
 		kill -9 $(cat $RSYSLOG_PIDBASE.pid)
 		# note: we do not wait for the actual termination!
-		;;
-    'injectmsg-litteral') # inject litteral-payload  via our inject interface (imdiag)
-		echo injecting msg payload from: $2
-		sed -e 's/^/injectmsg litteral /g' < "$2" | $TESTTOOL_DIR/diagtalker -p$IMDIAG_PORT || error_exit  $?
-		# TODO: some return state checking? (does it really make sense here?)
-		;;
-   'assert-equal')
-		if [ "x$4" == "x" ]; then
-			tolerance=0
-		else
-			tolerance=$4
-		fi
-		result=$(echo $2 $3 $tolerance | awk 'function abs(v) { return v > 0 ? v : -v } { print (abs($1 - $2) <= $3) ? "PASSED" : "FAILED" }')
-		if [ $result != 'PASSED' ]; then
-				echo "Value '$2' != '$3' (within tolerance of $tolerance)"
-		  error_exit 1
-		fi
 		;;
    'ensure-no-process-exists')
     ps -ef | grep -v grep | grep -qF "$2"
@@ -2383,20 +2599,6 @@ case $1 in
 	 'allow-single-stats-flush-after-block-and-wait-for-it')
 		echo blocking stats flush
 		echo "awaitStatsReport block_again" | $TESTTOOL_DIR/diagtalker -p$IMDIAG_PORT || error_exit  $?
-		;;
-	 'wait-for-stats-flush')
-		echo "will wait for stats push"
-		while [[ ! -f $2 ]]; do
-				echo waiting for stats file "'$2'" to be created
-				$TESTTOOL_DIR/msleep 100
-		done
-		prev_count=$(grep -c 'BEGIN$' <$2)
-		new_count=$prev_count
-		while [[ "x$prev_count" == "x$new_count" ]]; do
-				# busy spin, because it allows as close timing-coordination in actual test run as possible
-				new_count=$(grep -c 'BEGIN$' <"$2")
-		done
-		echo "stats push registered"
 		;;
 	 'wait-for-dyn-stats-reset')
 		echo "will wait for dyn-stats-reset"

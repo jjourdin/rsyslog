@@ -5,7 +5,7 @@
  *
  * File begun on 2008-07-25 by RGerhards
  *
- * Copyright 2008-2018 Adiscon GmbH.
+ * Copyright 2008-2020 Adiscon GmbH.
  *
  * This file is part of rsyslog.
  *
@@ -82,7 +82,7 @@ static prop_t *pInputName = NULL;
 static prop_t *pRcvDummy = NULL;
 static prop_t *pRcvIPDummy = NULL;
 
-static int max_empty_checks = 5; /* how often check for queue empty during shutdown? */
+static int max_empty_checks = 3; /* how often check for queue empty during shutdown? */
 
 statsobj_t *diagStats;
 STATSCOUNTER_DEF(potentialArtificialDelayMs, mutPotentialArtificialDelayMs)
@@ -264,17 +264,18 @@ injectMsg(uchar *pszCmd, tcps_sess_t *pSess)
 {
 	uchar wordBuf[1024];
 	int iFrom, nMsgs;
-	uchar *litteralMsg;
+	uchar *literalMsg;
 	int i;
 	ratelimit_t *ratelimit = NULL;
 	DEFiRet;
 
-	litteralMsg = NULL;
+	literalMsg = NULL;
 
+	memset(wordBuf, 0, sizeof(wordBuf));
 	CHKiRet(ratelimitNew(&ratelimit, "imdiag", "injectmsg"));
 	/* we do not check errors here! */
 	getFirstWord(&pszCmd, wordBuf, sizeof(wordBuf), TO_LOWERCASE);
-	if (ustrcmp(UCHAR_CONSTANT("litteral"), wordBuf) == 0) {
+	if (ustrcmp(UCHAR_CONSTANT("literal"), wordBuf) == 0) {
 		/* user has provided content for a message */
 		++pszCmd; /* ignore following space */
 		CHKiRet(doInjectMsg(pszCmd, ratelimit));
@@ -294,7 +295,7 @@ injectMsg(uchar *pszCmd, tcps_sess_t *pSess)
 finalize_it:
 	if(ratelimit != NULL)
 		ratelimitDestruct(ratelimit);
-	free(litteralMsg);
+	free(literalMsg);
 	RETiRet;
 }
 
@@ -315,6 +316,7 @@ waitMainQEmpty(tcps_sess_t *pSess)
 {
 	int iPrint = 0;
 	int nempty = 0;
+	static unsigned lastOverallQueueSize = 1;
 	DEFiRet;
 
 	while(1) {
@@ -330,7 +332,11 @@ waitMainQEmpty(tcps_sess_t *pSess)
 			nempty = 0;
 		}
 		if(dbgTimeoutToStderr) { /* we abuse this setting a bit ;-) */
-			fprintf(stderr, "imdiag: wait q_empty: qsize %d nempty %d\n", OverallQueueSize, nempty);
+			if(OverallQueueSize != lastOverallQueueSize) {
+				fprintf(stderr, "imdiag: wait q_empty: qsize %d nempty %d\n",
+					OverallQueueSize, nempty);
+				lastOverallQueueSize = OverallQueueSize;
+			}
 		}
 		if(nempty > max_empty_checks)
 			break;
@@ -434,6 +440,7 @@ awaitStatsReport(uchar *pszCmd, tcps_sess_t *pSess) {
 	int blockAgain = 0;
 	DEFiRet;
 
+	memset(subCmd, 0, sizeof(subCmd));
 	getFirstWord(&pszCmd, subCmd, sizeof(subCmd), TO_LOWERCASE);
 	blockAgain = (ustrcmp(UCHAR_CONSTANT("block_again"), subCmd) == 0);
 	if (statsReportingBlockStartTimeMs > 0) {
@@ -491,11 +498,12 @@ OnMsgReceived(tcps_sess_t *const pSess, uchar *const pRcv, const int iLenMsg)
 	 * WITHOUT a termination \0 char. So we need to convert it to one
 	 * before proceeding.
 	 */
-	CHKmalloc(pszMsg = malloc(iLenMsg + 1));
+	CHKmalloc(pszMsg = calloc(1, iLenMsg + 1));
 	pToFree = pszMsg;
 	memcpy(pszMsg, pRcv, iLenMsg);
 	pszMsg[iLenMsg] = '\0';
 
+	memset(cmdBuf, 0, sizeof(cmdBuf)); /* keep valgrind happy */
 	getFirstWord(&pszMsg, cmdBuf, sizeof(cmdBuf), TO_LOWERCASE);
 
 	dbgprintf("imdiag received command '%s'\n", cmdBuf);
