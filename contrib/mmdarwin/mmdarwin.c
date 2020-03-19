@@ -797,12 +797,12 @@ CODESTARTdoAction
 		pFieldValue = NULL;
 
 		/* case 1: static field. We simply forward it to Darwin */
-		if (pData->fieldList.name[i][0] != '!')
+		if (pData->fieldList.name[i][0] != '!' && pData->fieldList.name[i][0] != '.')
 		{
 			pFieldValue = strdup(pData->fieldList.name[i]);
-			/* case 2: dynamic field. We retrieve its value from the JSON logline and forward it to
-			 * Darwin */
 		}
+		/* case 2: dynamic field. We retrieve its value from the JSON logline and forward it to
+		 * Darwin */
 		else
 		{
 			if (!get_field(pMsg, pData->fieldList.name[i], &pFieldValue))
