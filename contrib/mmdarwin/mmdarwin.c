@@ -144,7 +144,7 @@ static rsRetVal doTryResume(wrkrInstanceData_t *pWrkrData);
 static rsRetVal sendMsg(wrkrInstanceData_t *pWrkrData, void *msg, size_t len);
 static rsRetVal receiveMsg(wrkrInstanceData_t *pWrkrData, void *response, size_t len);
 
-char* get_uuid_object(smsg_t *const pMsg);
+const char* get_uuid_object(smsg_t *const pMsg);
 int get_field(smsg_t *const pMsg, const char *pFieldName, char **ppRetString);
 int expand_buffer(dyn_buffer *pBody, size_t new_size);
 int add_field_to_body(dyn_buffer *pBody, const char *field, size_t size);
@@ -483,9 +483,10 @@ int end_body(dyn_buffer *pBody)
  *
  * return: a valid json_object pointer if found, NULL otherwise
  */
-char* get_uuid_object(smsg_t *const pMsg) {
+const char* get_uuid_object(smsg_t *const pMsg) {
 	struct json_object *mmdarwin_object = NULL;
-	char *result = NULL;
+	const char *result = NULL;
+	const char *key;
 
 	msgPropDescr_t propDesc;
 	msgPropDescrFill(&propDesc, (uchar *)runModConf->container, strlen(runModConf->container));
@@ -496,7 +497,7 @@ char* get_uuid_object(smsg_t *const pMsg) {
 		struct json_object_iterator itEnd = json_object_iter_end(mmdarwin_object);
 
 		while(!json_object_iter_equal(&it, &itEnd)) {
-			const char *key = json_object_iter_peek_name(&it);
+			*key = json_object_iter_peek_name(&it);
 
 			if(!strcmp(key, JSON_DARWIN_ID)) {
 				result = json_object_get_string(json_object_iter_peek_value(&it));
@@ -882,7 +883,7 @@ could not extract field '%s' from message\n", pData->fieldList.name[i]);
 		.filter_code = pData->filterCode,
 		.body_size = pWrkrData->darwinBody.bufferMsgSize};
 
-	char *uuid = get_uuid_object(pMsg);
+	const char *uuid = get_uuid_object(pMsg);
 	if(uuid) {
 		DBGPRINTF("mmdarwin: using existing UUID\n");
 		uuid_parse(uuid, header.evt_id);
