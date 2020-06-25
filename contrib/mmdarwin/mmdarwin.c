@@ -497,7 +497,7 @@ const char* get_uuid_object(smsg_t *const pMsg) {
 		struct json_object_iterator itEnd = json_object_iter_end(mmdarwin_object);
 
 		while(!json_object_iter_equal(&it, &itEnd)) {
-			*key = json_object_iter_peek_name(&it);
+			key = json_object_iter_peek_name(&it);
 
 			if(!strcmp(key, JSON_DARWIN_ID)) {
 				result = json_object_get_string(json_object_iter_peek_value(&it));
