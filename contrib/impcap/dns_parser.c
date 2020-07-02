@@ -316,7 +316,7 @@ data_ret_t *dns_parse(const uchar *packet, int pktSize, struct json_object *jpar
 		char domain_query[256] = {0};
 		uchar nb_char = *packet_ptr;
 		packet_ptr++;
-		int cpt = 0;
+		size_t cpt = 0;
 		while (cpt + 1 < query_size) {
 			if (nb_char == 0) {
 				nb_char = *packet_ptr;
