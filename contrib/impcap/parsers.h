@@ -114,6 +114,14 @@ data_ret_t *http_parse(const uchar *packet, int pktSize, struct json_object *jpa
 
 data_ret_t *dns_parse(const uchar *packet, int pktSize, struct json_object *jparent);
 
+
+// inline function definitions
+inline data_ret_t *dont_parse(const uchar *packet, int pktSize, __attribute__((unused)) struct json_object *jparent);
+
+inline data_ret_t *eth_proto_parse(uint16_t ethProto, const uchar *packet, int pktSize, struct json_object *jparent);
+
+inline data_ret_t *ip_proto_parse(uint16_t ipProto, const uchar *packet, int pktSize, struct json_object *jparent);
+
 /*
  *  Mock function to do no parsing when protocol is not a valid number
 */
