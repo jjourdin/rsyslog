@@ -124,7 +124,7 @@ int open_mmdb(const char *file, MMDB_s *mmdb) {
 		LogError(0, RS_RET_SUSPENDED, "maxminddb error: cannot open database file");
 	}
 
-	return status;
+	return MMDB_SUCCESS != status;
 }
 
 void close_mmdb(MMDB_s *mmdb) {
@@ -162,8 +162,9 @@ ENDcreateInstance
 
 BEGINcreateWrkrInstance
 CODESTARTcreateWrkrInstance
-	iRet = open_mmdb(pData->pszMmdbFile, &pWrkrData->mmdb);
-	pthread_mutex_init(&pWrkrData->mmdbMutex, NULL);
+	CHKiRet(open_mmdb(pData->pszMmdbFile, &pWrkrData->mmdb));
+	CHKiConcCtrl(pthread_mutex_init(&pWrkrData->mmdbMutex, NULL));
+finalize_it:
 ENDcreateWrkrInstance
 
 
@@ -447,16 +448,15 @@ ENDdoAction
 // HUP handling for the worker...
 BEGINdoHUPWrkr
 CODESTARTdoHUPWrkr
-	dbgprintf("mmdblookup: HUP received, reloading mmdb\n");
+	dbgprintf("mmdblookup: HUP received\n");
 	if (pWrkrData->pData->reloadOnHup) {
 		// a mutex is needed, as it's the main thread that runs this handler
 		pthread_mutex_lock(&pWrkrData->mmdbMutex);
-		LogMsg(0, NO_ERRCODE, LOG_INFO, "mmdblookup: received HUP, reloading MMDB file");
+		LogMsg(0, NO_ERRCODE, LOG_INFO, "mmdblookup: reloading MMDB file");
 		close_mmdb(&pWrkrData->mmdb);
-		CHKiRet(open_mmdb(pWrkrData->pData->pszMmdbFile, &pWrkrData->mmdb));
+		iRet = open_mmdb(pWrkrData->pData->pszMmdbFile, &pWrkrData->mmdb);
 		pthread_mutex_unlock(&pWrkrData->mmdbMutex);
 	}
-finalize_it:
 ENDdoHUPWrkr
 
 
