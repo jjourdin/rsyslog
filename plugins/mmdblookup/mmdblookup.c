@@ -361,6 +361,7 @@ CODESTARTdoAction
 	rsRetVal localRet = msgGetJSONPropJSON(pMsg, &pProp, &keyjson);
 	msgPropDescrDestruct(&pProp);
 
+	pthread_mutex_lock(&pWrkrData->mmdbMutex);
 	if (localRet != RS_RET_OK) {
 		/* key not found in the message. nothing to do */
 		ABORT_FINALIZE(RS_RET_OK);
@@ -372,7 +373,6 @@ CODESTARTdoAction
 	}
 
 	int gai_err, mmdb_err;
-	pthread_mutex_lock(&pWrkrData->mmdbMutex);
 	MMDB_lookup_result_s result = MMDB_lookup_string(&pWrkrData->mmdb, pszValue, &gai_err, &mmdb_err);
 
 	if (0 != gai_err) {
@@ -407,8 +407,6 @@ CODESTARTdoAction
 		str_split(&membuf);
 	}
 
-	pthread_mutex_unlock(&pWrkrData->mmdbMutex);
-
 	DBGPRINTF("maxmindb returns: '%s'\n", membuf);
 	total_json = json_tokener_parse(membuf);
 	fclose(memstream);
@@ -438,6 +436,7 @@ CODESTARTdoAction
 	}
 
 finalize_it:
+	pthread_mutex_unlock(&pWrkrData->mmdbMutex);
 	if(entry_data_list != NULL)
 		MMDB_free_entry_data_list(entry_data_list);
 	json_object_put(keyjson);
