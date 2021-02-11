@@ -23,7 +23,7 @@
 * Author: Jérémie Jourdin
 * <jeremie.jourdin@advens.fr>
 */
- */
+
 #include "config.h"
 #include <stdio.h>
 #include <stdarg.h>
