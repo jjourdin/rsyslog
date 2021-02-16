@@ -712,6 +712,9 @@ imhirediswrkr(void *myself)
 		/* Handle Redis reconnexion */
 		if(me->inst->bIsConnected == 0)
 		{
+			//Sleep 10 seconds before attempting to resume a broken connexion
+			srSleep(10, 0);
+
 			DBGPRINTF("imhiredis: Redis problem, attempting to recover...  Working key is '%s' \n", me->inst->key);
 			LogError(0, NO_ERRCODE, "imhiredis: Redis problem, attempting to recover... Working key is '%s' \n", me->inst->key);
 			if (me->inst->mode == IMHIREDIS_MODE_SUBSCRIBE)
@@ -721,8 +724,6 @@ imhirediswrkr(void *myself)
                 		if (me->inst->aconn->err) {
 					DBGPRINTF("imhiredis: can not recover redis connexion on server '%s', port '%d' for channel '%s'", me->inst->server, me->inst->port, me->inst->key);
                 		        LogError(0, RS_RET_HIREDIS_ERROR, "imhiredis: can not recover redis connexion on server '%s', port '%d' for channel '%'", me->inst->server, me->inst->port, me->inst->key);
-					//Sleep 10 seconds before next attempt
-					srSleep(10, 0);
                			}
 				else me->inst->bIsConnected = 1;
         		}
@@ -732,8 +733,6 @@ imhirediswrkr(void *myself)
 				if (me->inst->conn->err) {
 					DBGPRINTF("imhiredis: can not recover redis connexion on server '%s', port '%d' for queue '%s'", me->inst->server, me->inst->port, me->inst->key);
                 		        LogError(0, RS_RET_HIREDIS_ERROR, "imhiredis: can not recover redis connexion on server '%s', port '%d' queue key '%'", me->inst->server, me->inst->port, me->inst->key);
-					//Sleep 10 seconds before next attempt
-					srSleep(10, 0);
 				}
 				else me->inst->bIsConnected = 1;
 			}
@@ -749,7 +748,7 @@ imhirediswrkr(void *myself)
 					if (rc != REDIS_OK) {
 						LogError(0, NO_ERRCODE, "imhiredis: WARNING: Authentication failure !\n");
 						me->inst->bIsConnected = 0;
-						break;
+						//break;
 					}
 				}
 				DBGPRINTF("imhiredis: Subscribing to key %s \n",me->inst->key);
@@ -763,8 +762,6 @@ imhirediswrkr(void *myself)
                             	LogError(0, NO_ERRCODE, "imhiredis: WARNING: Connexion lost to REDIS for key '%s' \n", me->inst->key);
 				me->inst->bIsConnected = 0;
 
-				//Sleep 10 seconds before next attempt
-				srSleep(10, 0);
 			}
 			else if (me->inst->conn != NULL && me->inst->mode==IMHIREDIS_MODE_QUEUE) 
 			{
@@ -774,7 +771,7 @@ imhirediswrkr(void *myself)
 					if (rc != REDIS_OK) {
 						LogError(0, NO_ERRCODE, "imhiredis: WARNING: Authentication failure !\n");
 						me->inst->bIsConnected = 0;
-						break;
+						//break;
 					}
 					rc = redisGetReply(me->inst->conn, (void **) &reply);
 					if (rc != REDIS_OK) {
@@ -782,14 +779,14 @@ imhirediswrkr(void *myself)
 						me->inst->bIsConnected = 0;
 						if (reply != NULL) 
 							freeReplyObject(reply);
-                                	        break;
+                                	        //break;
                                 	}
 					if (strcmp(reply->str, "OK")) {
                                 	        LogError(0, NO_ERRCODE, "imhiredis: Authentication failure");
 						me->inst->bIsConnected = 0;
 						if (reply != NULL) 
 							freeReplyObject(reply);
-                                	        break;
+                                	        //break;
 					}
 					
 				}
