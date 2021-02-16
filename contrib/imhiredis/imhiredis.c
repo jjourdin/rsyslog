@@ -160,6 +160,9 @@ static struct cnfparamblk inppblk =
 	  inppdescr
 	};
 
+struct timeval redis_connect_timeout = { 1, 500000 }; /* 1.5 seconds */
+
+
 #include "im-helper.h" /* must be included AFTER the type definitions! */
 
 /* ------------------------------ callbacks ------------------------------ */
@@ -268,7 +271,6 @@ checkInstance(instanceConf_t *const inst)
 {
 	DEFiRet;
 	
-	struct timeval timeout = { 1, 500000 }; /* 1.5 seconds */
 	redisReply *reply=NULL;
 
 	/* establish our connection to redis */
@@ -295,23 +297,32 @@ checkInstance(instanceConf_t *const inst)
 	}
 
 	DBGPRINTF("imhiredis: trying connect to '%s' at port %d\n", inst->server, inst->port);
+	inst->bIsConnected = 0;
 
 	if (inst->mode == IMHIREDIS_MODE_SUBSCRIBE) 
 	{
 		DBGPRINTF("imhiredis: setting mode: 'SUBSCRIBE'\n");
 		inst->aconn = redisAsyncConnect((const char *)inst->server, inst->port);
+
+		//In case of an error, don't abort here because it is handled later, within the thread
 		if (inst->aconn->err) {
 			LogError(0, RS_RET_HIREDIS_ERROR, "imhiredis: can not initialize redis handle");
-			ABORT_FINALIZE(RS_RET_HIREDIS_ERROR);
+			//ABORT_FINALIZE(RS_RET_HIREDIS_ERROR);
 		}
+		// Redis Consumer is opened 
+		inst->bIsConnected = 1;
 	} 
 	else if (inst->mode == IMHIREDIS_MODE_QUEUE) {
 		DBGPRINTF("imhiredis: setting mode: 'QUEUE'\n");
-		inst->conn = redisConnectWithTimeout((const char *)inst->server, inst->port, timeout);
+		inst->conn = redisConnectWithTimeout((const char *)inst->server, inst->port, redis_connect_timeout);
+
+		// In case of an error, don't abort because it is handled later, within the thread 
 		if (inst->conn->err) {
 			LogError(0, RS_RET_HIREDIS_ERROR, "imhiredis: can not initialize redis handle");
-			ABORT_FINALIZE(RS_RET_HIREDIS_ERROR);
+			//ABORT_FINALIZE(RS_RET_HIREDIS_ERROR);
 		}
+		// Redis Consumer is opened 
+		inst->bIsConnected = 1;
 	}
 	else {
 		DBGPRINTF("imhiredis: invalid mode, please choose 'subscribe' or 'queue' mode  \n");
@@ -319,13 +330,10 @@ checkInstance(instanceConf_t *const inst)
 		ABORT_FINALIZE(RS_RET_HIREDIS_ERROR);
 	}
 
-
 	if (inst->password != NULL) {
 		DBGPRINTF("imhiredis: setting password: '%s'\n", inst->password);
 	}
 
-	/* Redis Consumer is opened */
-	inst->bIsConnected = 1;
 
 finalize_it:
 	if (reply != NULL)
@@ -687,7 +695,7 @@ CODEmodInit_QueryRegCFSLineHdlr
 ENDmodInit
 
 /*
-*	Workerthread function for a single hiredis consomer
+ *	Workerthread function for a single hiredis consomer
  */
 static void *
 imhirediswrkr(void *myself)
@@ -701,14 +709,46 @@ imhirediswrkr(void *myself)
 		if(glbl.GetGlobalInputTermState() == 1)
 			break; /* terminate input! */
 
-		/* Fixme: Handle Redis disconect */
-		if(me->inst->bIsConnected == 1 && (me->inst->conn != NULL || me->inst->aconn != NULL)) {
+		/* Handle Redis reconnexion */
+		if(me->inst->bIsConnected == 0)
+		{
+			DBGPRINTF("imhiredis: Redis problem, attempting to recover...  Working key is '%s' \n", me->inst->key);
+			LogError(0, NO_ERRCODE, "imhiredis: Redis problem, attempting to recover... Working key is '%s' \n", me->inst->key);
+			if (me->inst->mode == IMHIREDIS_MODE_SUBSCRIBE)
+        		{
+                		DBGPRINTF("imhiredis: setting mode: 'SUBSCRIBE'\n");
+                		me->inst->aconn = redisAsyncConnect((const char *)me->inst->server, me->inst->port);
+                		if (me->inst->aconn->err) {
+					DBGPRINTF("imhiredis: can not recover redis connexion on server '%s', port '%d' for channel '%s'", me->inst->server, me->inst->port, me->inst->key);
+                		        LogError(0, RS_RET_HIREDIS_ERROR, "imhiredis: can not recover redis connexion on server '%s', port '%d' for channel '%'", me->inst->server, me->inst->port, me->inst->key);
+					//Sleep 10 seconds before next attempt
+					srSleep(10, 0);
+               			}
+				else me->inst->bIsConnected = 1;
+        		}
+        		else if (me->inst->mode == IMHIREDIS_MODE_QUEUE) {
+				DBGPRINTF("imhiredis: setting mode: 'QUEUE'\n");
+				me->inst->conn = redisConnectWithTimeout((const char *)me->inst->server, me->inst->port, redis_connect_timeout);
+				if (me->inst->conn->err) {
+					DBGPRINTF("imhiredis: can not recover redis connexion on server '%s', port '%d' for queue '%s'", me->inst->server, me->inst->port, me->inst->key);
+                		        LogError(0, RS_RET_HIREDIS_ERROR, "imhiredis: can not recover redis connexion on server '%s', port '%d' queue key '%'", me->inst->server, me->inst->port, me->inst->key);
+					//Sleep 10 seconds before next attempt
+					srSleep(10, 0);
+				}
+				else me->inst->bIsConnected = 1;
+			}
+		}
+
+
+		if(me->inst->bIsConnected == 1 && (me->inst->conn != NULL || me->inst->aconn != NULL)) 
+		{
 			if (me->inst->aconn != NULL && me->inst->mode==IMHIREDIS_MODE_SUBSCRIBE) 
 			{
 				if (me->inst->password) {
 					rc = redisAsyncCommand(me->inst->aconn, NULL, me->inst, "AUTH %s", me->inst->password);
 					if (rc != REDIS_OK) {
 						LogError(0, NO_ERRCODE, "imhiredis: WARNING: Authentication failure !\n");
+						me->inst->bIsConnected = 0;
 						break;
 					}
 				}
@@ -717,33 +757,44 @@ imhirediswrkr(void *myself)
 				redisLibeventAttach(me->inst->aconn, base);
                                 redisAsyncCommand(me->inst->aconn, msgSubscribeAsync, me->inst, "SUBSCRIBE %s", me->inst->key);
 				event_base_dispatch(base);
-				//DBGPRINTF("imhiredis: event_base_dispatch ended for key '%s' \n",me->inst->key);
-                            	//LogError(0, NO_ERRCODE, "imhiredis: event_base_dispatch ended for key '%s' \n",me->inst->key);
+
+				/* We should never be there, except in case of a connexion failure or redis issue */
+				DBGPRINTF("imhiredis: WARNING: Connexion lost to REDIS for key '%s' \n", me->inst->key);
+                            	LogError(0, NO_ERRCODE, "imhiredis: WARNING: Connexion lost to REDIS for key '%s' \n", me->inst->key);
+				me->inst->bIsConnected = 0;
+
+				//Sleep 10 seconds before next attempt
+				srSleep(10, 0);
 			}
-			else if (me->inst->conn != NULL && me->inst->mode==IMHIREDIS_MODE_QUEUE) {
+			else if (me->inst->conn != NULL && me->inst->mode==IMHIREDIS_MODE_QUEUE) 
+			{
 				redisReply *reply=NULL;
 				if (me->inst->password) {
 					rc = redisAppendCommand(me->inst->conn, "AUTH %s", me->inst->password);
 					if (rc != REDIS_OK) {
 						LogError(0, NO_ERRCODE, "imhiredis: WARNING: Authentication failure !\n");
+						me->inst->bIsConnected = 0;
 						break;
 					}
 					rc = redisGetReply(me->inst->conn, (void **) &reply);
 					if (rc != REDIS_OK) {
                                 	        LogError(0, NO_ERRCODE, "imhiredis: Authentication error");
+						me->inst->bIsConnected = 0;
 						if (reply != NULL) 
 							freeReplyObject(reply);
                                 	        break;
                                 	}
 					if (strcmp(reply->str, "OK")) {
                                 	        LogError(0, NO_ERRCODE, "imhiredis: Authentication failure");
+						me->inst->bIsConnected = 0;
 						if (reply != NULL) 
 							freeReplyObject(reply);
                                 	        break;
 					}
 					
 				}
-				if (me->inst->useLPop == 1) { 
+				if (me->inst->useLPop == 1) 
+				{ 
 					DBGPRINTF("imhiredis: Queuing #%d LPOP commands on key '%s' \n", QUEUE_BATCH_SIZE, me->inst->key);
 					for ( i=0; i<QUEUE_BATCH_SIZE; ++i ) {
 						redisAppendCommand(me->inst->conn, "LPOP %s", me->inst->key);
@@ -756,10 +807,13 @@ imhirediswrkr(void *myself)
 					}
 				}
 				
-				while ( i-- > 0 ) {
+				while ( i-- > 0 ) 
+				{
 					rc = redisGetReply(me->inst->conn, (void **) &reply);
-					if (rc != REDIS_OK) {
+					if (rc != REDIS_OK) 
+					{
                                 	        LogError(0, NO_ERRCODE, "imhiredis: Error reading reply after POP#%d on key '%s'", i, me->inst->key);
+						me->inst->bIsConnected = 0;
 						if (reply != NULL) 
 							freeReplyObject(reply);
                                 	        break;
