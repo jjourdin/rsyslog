@@ -2801,6 +2801,10 @@ DoSaveOnShutdown(qqueue_t *pThis)
 BEGINobjDestruct(qqueue) /* be sure to specify the object type also in END and CODESTART macros! */
 CODESTARTobjDestruct(qqueue)
 	DBGOPRINT((obj_t*) pThis, "shutdown: begin to destruct queue\n");
+	if(glblShutdownQueueDoubleSize) {
+		pThis->iHighWtrMrk *= 2;
+		pThis->iMaxQueueSize *= 2;
+	}
 	if(pThis->bQueueStarted) {
 		/* shut down all workers
 		 * We do not need to shutdown workers when we are in enqueue-only mode or we are a
@@ -3355,13 +3359,17 @@ qqueueApplyCnfParam(qqueue_t *pThis, struct nvlst *lst)
 					      "corrected to '%s'", pThis->pszSpoolDir);
 			}
 		} else if(!strcmp(pblk.descr[i].name, "queue.size")) {
-			pThis->iMaxQueueSize = pvals[i].val.d.n;
-			if(pThis->iMaxQueueSize > OVERSIZE_QUEUE_WATERMARK) {
+			if(pvals[i].val.d.n > 0x7fffffff) {
+				parser_warnmsg("queue.size higher than maximum (2147483647) - "
+					      "corrected to maximum");
+				pvals[i].val.d.n = 0x7fffffff;
+			} else if(pvals[i].val.d.n > OVERSIZE_QUEUE_WATERMARK) {
 				parser_warnmsg("queue.size=%d is very large - is this "
 					"really intended? More info at "
 					"https://www.rsyslog.com/avoid-overly-large-in-memory-queues/",
-					pThis->iMaxQueueSize);
+					(int) pvals[i].val.d.n);
 			}
+			pThis->iMaxQueueSize = pvals[i].val.d.n;
 		} else if(!strcmp(pblk.descr[i].name, "queue.dequeuebatchsize")) {
 			pThis->iDeqBatchSize = pvals[i].val.d.n;
 		} else if(!strcmp(pblk.descr[i].name, "queue.mindequeuebatchsize")) {

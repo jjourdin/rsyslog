@@ -7,7 +7,7 @@
  * of the "old" message code without any modifications. However, it
  * helps to have things at the right place one we go to the meat of it.
  *
- * Copyright 2007-2019 Rainer Gerhards and Adiscon GmbH.
+ * Copyright 2007-2020 Rainer Gerhards and Adiscon GmbH.
  *
  * This file is part of the rsyslog runtime library.
  *
@@ -567,7 +567,7 @@ getRcvFromIP(smsg_t * const pM)
 
 /* map a property name (string) to a property ID */
 rsRetVal
-propNameToID(uchar *pName, propid_t *pPropID)
+propNameToID(const uchar *const pName, propid_t *const pPropID)
 {
 	DEFiRet;
 
@@ -666,6 +666,8 @@ propNameToID(uchar *pName, propid_t *pPropID)
 		*pPropID = PROP_SYS_MINUTE_UTC;
 	} else if(!strcasecmp((char*) pName, "$wday-utc")) {
 		*pPropID = PROP_SYS_WDAY_UTC;
+	} else if(!strcasecmp((char*) pName, "$now-unixtimestamp")) {
+		*pPropID = PROP_SYS_NOW_UXTIMESTAMP;
 	} else if(!strcasecmp((char*) pName, "$MYHOSTNAME")) {
 		*pPropID = PROP_SYS_MYHOSTNAME;
 	} else if(!strcasecmp((char*) pName, "$!all-json")) {
@@ -786,6 +788,8 @@ uchar *propIDToName(propid_t propID)
 			return UCHAR_CONSTANT("$WDAY");
 		case PROP_SYS_WDAY_UTC:
 			return UCHAR_CONSTANT("$WDAY-UTC");
+		case PROP_SYS_NOW_UXTIMESTAMP:
+			return UCHAR_CONSTANT("$NOW-UNIXTIMESTAMP");
 		case PROP_SYS_MYHOSTNAME:
 			return UCHAR_CONSTANT("$MYHOSTNAME");
 		case PROP_CEE_ALL_JSON:
@@ -2619,22 +2623,21 @@ MsgGetStructuredData(smsg_t * const pM, uchar **pBuf, rs_size_t *len)
 uchar * ATTR_NONNULL(1)
 getProgramName(smsg_t *const pM, const sbool bLockMutex)
 {
+	if(bLockMutex == LOCK_MUTEX) {
+		MsgLock(pM);
+	}
+
 	if(pM->iLenPROGNAME == -1) {
 		if(pM->iLenTAG == 0) {
 			uchar *pRes;
 			rs_size_t bufLen = -1;
-			getTAG(pM, &pRes, &bufLen, bLockMutex);
+			getTAG(pM, &pRes, &bufLen, MUTEX_ALREADY_LOCKED);
 		}
+		aquireProgramName(pM);
+	}
 
-		if(bLockMutex == LOCK_MUTEX) {
-			MsgLock(pM);
-			/* need to re-check, things may have change in between! */
-			if(pM->iLenPROGNAME == -1)
-				aquireProgramName(pM);
-			MsgUnlock(pM);
-		} else {
-			aquireProgramName(pM);
-		}
+	if(bLockMutex == LOCK_MUTEX) {
+		MsgUnlock(pM);
 	}
 	return (pM->iLenPROGNAME < CONF_PROGNAME_BUFSIZE) ? pM->PROGNAME.szBuf
 						       : pM->PROGNAME.ptr;
@@ -3143,7 +3146,7 @@ getJSONPropVal(smsg_t * const pMsg, msgPropDescr_t *pProp, uchar **pRes, rs_size
 		field = *jroot;
 	} else {
 		leaf = jsonPathGetLeaf(pProp->name, pProp->nameLen);
-		CHKiRet(jsonPathFindParent(*jroot, pProp->name, leaf, &parent, 1));
+		CHKiRet(jsonPathFindParent(*jroot, pProp->name, leaf, &parent, 0));
 		if(jsonVarExtract(parent, (char*)leaf, &field) == FALSE)
 			field = NULL;
 	}
@@ -3198,7 +3201,7 @@ msgGetJSONPropJSONorString(smsg_t * const pMsg, msgPropDescr_t *pProp, struct js
 		ABORT_FINALIZE(RS_RET_NOT_FOUND);
 	}
 	leaf = jsonPathGetLeaf(pProp->name, pProp->nameLen);
-	CHKiRet(jsonPathFindParent(*jroot, pProp->name, leaf, &parent, 1));
+	CHKiRet(jsonPathFindParent(*jroot, pProp->name, leaf, &parent, 0));
 	if(jsonVarExtract(parent, (char*)leaf, pjson) == FALSE) {
 		ABORT_FINALIZE(RS_RET_NOT_FOUND);
 	}
@@ -3243,7 +3246,7 @@ msgGetJSONPropJSON(smsg_t * const pMsg, msgPropDescr_t *pProp, struct json_objec
 		FINALIZE;
 	}
 	leaf = jsonPathGetLeaf(pProp->name, pProp->nameLen);
-	CHKiRet(jsonPathFindParent(*jroot, pProp->name, leaf, &parent, 1));
+	CHKiRet(jsonPathFindParent(*jroot, pProp->name, leaf, &parent, 0));
 	if(jsonVarExtract(parent, (char*)leaf, pjson) == FALSE) {
 		ABORT_FINALIZE(RS_RET_NOT_FOUND);
 	}
@@ -3796,6 +3799,16 @@ uchar *MsgGetProp(smsg_t *__restrict__ const pMsg, struct templateEntry *__restr
 			} else {
 				*pbMustBeFreed = 1;
 				bufLen = 2;
+			}
+			break;
+		case PROP_SYS_NOW_UXTIMESTAMP:
+			if((pRes = malloc(16)) == NULL) {
+				RET_OUT_OF_MEMORY;
+			} else {
+				snprintf((char*) pRes, 16-1, "%lld", (long long) getTime(NULL));
+				pRes[16-1] = '\0';
+				*pbMustBeFreed = 1;
+				bufLen = -1;
 			}
 			break;
 		case PROP_SYS_MYHOSTNAME:
@@ -4827,6 +4840,11 @@ jsonPathFindNext(struct json_object *root, uchar *namestart, uchar **name, uchar
 		if(!bCreate) {
 			ABORT_FINALIZE(RS_RET_JNAME_INVALID);
 		} else {
+			if (json_object_get_type(root) != json_type_object) {
+				DBGPRINTF("jsonPathFindNext with bCreate: not a container in json path, "
+					"name is '%s'\n", namestart);
+				ABORT_FINALIZE(RS_RET_INVLD_SETOP);
+			}
 			json = json_object_new_object();
 			json_object_object_add(root, (char*)namebuf, json);
 		}
@@ -4839,14 +4857,15 @@ finalize_it:
 }
 
 static rsRetVal
-jsonPathFindParent(struct json_object *jroot, uchar *name, uchar *leaf, struct json_object **parent, int bCreate)
+jsonPathFindParent(struct json_object *jroot, uchar *name, uchar *leaf, struct json_object **parent,
+	const int bCreate)
 {
 	uchar *namestart;
 	DEFiRet;
 	namestart = name;
 	*parent = jroot;
 	while(name < leaf-1) {
-		jsonPathFindNext(*parent, namestart, &name, leaf, parent, bCreate);
+		CHKiRet(jsonPathFindNext(*parent, namestart, &name, leaf, parent, bCreate));
 	}
 	if(*parent == NULL)
 		ABORT_FINALIZE(RS_RET_NOT_FOUND);
@@ -4877,27 +4896,52 @@ jsonMerge(struct json_object *existing, struct json_object *json)
 
 /* find a JSON structure element (field or container doesn't matter).  */
 rsRetVal
-jsonFind(struct json_object *jroot, msgPropDescr_t *pProp, struct json_object **jsonres)
+jsonFind(smsg_t *const pMsg, msgPropDescr_t *pProp, struct json_object **jsonres)
 {
 	uchar *leaf;
 	struct json_object *parent;
 	struct json_object *field;
+	struct json_object **jroot = NULL;
+	pthread_mutex_t *mut = NULL;
 	DEFiRet;
 
-	if(jroot == NULL) {
+	CHKiRet(getJSONRootAndMutex(pMsg, pProp->id, &jroot, &mut));
+	pthread_mutex_lock(mut);
+
+	if(*jroot == NULL) {
 		field = NULL;
 		goto finalize_it;
 	}
 
 	if(!strcmp((char*)pProp->name, "!")) {
-		field = jroot;
+		field = *jroot;
+	} else if(!strcmp((char*)pProp->name, ".")) {
+		field = *jroot;
 	} else {
 		leaf = jsonPathGetLeaf(pProp->name, pProp->nameLen);
-		CHKiRet(jsonPathFindParent(jroot, pProp->name, leaf, &parent, 0));
+		CHKiRet(jsonPathFindParent(*jroot, pProp->name, leaf, &parent, 0));
 		if(jsonVarExtract(parent, (char*)leaf, &field) == FALSE)
 			field = NULL;
 	}
 	*jsonres = field;
+
+finalize_it:
+	if(mut != NULL)
+		pthread_mutex_unlock(mut);
+	RETiRet;
+}
+
+/* check if JSON variable exists (works on terminal var and container) */
+rsRetVal ATTR_NONNULL()
+msgCheckVarExists(smsg_t *const pMsg, msgPropDescr_t *pProp)
+{
+	struct json_object *jsonres = NULL;
+	DEFiRet;
+
+	CHKiRet(jsonFind(pMsg, pProp, &jsonres));
+	if(jsonres == NULL) {
+		iRet = RS_RET_NOT_FOUND;
+	}
 
 finalize_it:
 	RETiRet;
@@ -4936,7 +4980,11 @@ msgAddJSON(smsg_t * const pM, uchar *name, struct json_object *json, int force_r
 			*jroot = json_object_new_object();
 		}
 		leaf = jsonPathGetLeaf(name, ustrlen(name));
-		CHKiRet(jsonPathFindParent(*jroot, name, leaf, &parent, 1));
+		iRet = jsonPathFindParent(*jroot, name, leaf, &parent, 1);
+		if (unlikely(iRet != RS_RET_OK)) {
+			json_object_put(json);
+			FINALIZE;
+		}
 		if (json_object_get_type(parent) != json_type_object) {
 			DBGPRINTF("msgAddJSON: not a container in json path,"
 				"name is '%s'\n", name);
@@ -5007,7 +5055,7 @@ msgDelJSON(smsg_t * const pM, uchar *name)
 		*jroot = NULL;
 	} else {
 		leaf = jsonPathGetLeaf(name, ustrlen(name));
-		CHKiRet(jsonPathFindParent(*jroot, name, leaf, &parent, 1));
+		CHKiRet(jsonPathFindParent(*jroot, name, leaf, &parent, 0));
 		if(jsonVarExtract(parent, (char*)leaf, &leafnode) == FALSE)
 			leafnode = NULL;
 		if(leafnode == NULL) {

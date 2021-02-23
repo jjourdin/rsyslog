@@ -48,6 +48,7 @@ check_PROGRAMS = $(TESTRUNS) ourtail tcpflood chkseq msleep randomgen \
 	have_relpSrvSetOversizeMode \
 	have_relpEngineSetTLSLibByName \
 	have_relpSrvSetTlsConfigCmd \
+	check_relpEngineVersion \
 	test_id
 if ENABLE_JOURNAL_TESTS
 if ENABLE_IMJOURNAL
@@ -155,6 +156,9 @@ endif # if ENABLE_ELASTICSEARCH_TESTS
 if ENABLE_DEFAULT_TESTS
 TESTS +=  \
 	immark.sh \
+	immark-inputname.sh \
+	immark-ruleset.sh \
+	immark-ruleset-custom-msg.sh \
 	operatingstate-basic.sh \
 	operatingstate-empty.sh \
 	operatingstate-unclean.sh \
@@ -277,8 +281,10 @@ TESTS +=  \
 	imtcp-msg-truncation-on-number2.sh \
 	imtcp-NUL.sh \
 	imtcp-NUL-rawmsg.sh \
-	imtcp-multiport.sh \
 	imtcp_incomplete_frame_at_end.sh \
+	imtcp-multiport.sh \
+	imtcp-bigmessage-octetcounting.sh \
+	imtcp-bigmessage-octetstuffing.sh \
 	da-queue-persist.sh \
 	daqueue-persist.sh \
 	daqueue-invld-qi.sh \
@@ -287,6 +293,7 @@ TESTS +=  \
 	diskqueue.sh \
 	diskqueue-fsync.sh \
 	diskqueue-full.sh \
+	diskqueue-fail.sh \
 	diskqueue-non-unique-prefix.sh \
 	rulesetmultiqueue.sh \
 	rulesetmultiqueue-v6.sh \
@@ -418,6 +425,12 @@ TESTS +=  \
 	rscript_parse_json.sh \
 	rscript_previous_action_suspended.sh \
 	rscript_str2num_negative.sh \
+	rscript_exists-yes.sh \
+	rscript_exists-yes2.sh \
+	rscript_exists-not1.sh \
+	rscript_exists-not2.sh \
+	rscript_exists-not3.sh \
+	rscript_exists-not4.sh \
 	rscript-config_enable-on.sh \
 	config_output-o-option.sh \
 	rs-cnum.sh \
@@ -441,6 +454,7 @@ TESTS +=  \
 	lookup_table_rscript_reload.sh \
 	lookup_table_rscript_reload_without_stub.sh \
 	include-obj-text-from-file.sh \
+	include-obj-text-from-file-noexist.sh \
 	multiple_lookup_tables.sh \
 	parsertest-parse1.sh \
 	parsertest-parse1-udp.sh \
@@ -458,6 +472,7 @@ TESTS +=  \
 	parsertest-parse-nodate-udp.sh \
 	parsertest-snare_ccoff_udp.sh \
 	parsertest-snare_ccoff_udp2.sh
+
 if ENABLE_LIBGCRYPT
 TESTS +=  \
 	queue-encryption-disk.sh \
@@ -617,6 +632,7 @@ TESTS +=  \
 	now-utc.sh \
 	now-utc-ymd.sh \
 	now-utc-casecmp.sh \
+	now-unixtimestamp.sh \
 	timegenerated-ymd.sh \
 	timegenerated-uxtimestamp.sh \
 	timegenerated-uxtimestamp-invld.sh \
@@ -844,7 +860,9 @@ TESTS +=  \
 	omhttp-batch-lokirest-retry.sh \
 	omhttp-batch-lokirest.sh \
 	omhttp-batch-newline.sh \
-	omhttp-retry.sh
+	omhttp-retry.sh \
+	omhttp-httpheaderkey.sh \
+	omhttp-multiplehttpheaders.sh
 if HAVE_VALGRIND
 TESTS +=  \
 	omhttp-auth-vg.sh \
@@ -891,6 +909,7 @@ imkafka_multi_single.log: imkafka-hang-other-action-on-no-kafka.log
 sndrcv_kafka.log: imkafka_multi_single.log
 imkafka_multi_group.log: sndrcv_kafka.log
 sndrcv_kafka_multi_topics.log: imkafka_multi_group.log
+omkafkadynakey.log: sndrcv_kafka_multi_topics.log
 
 if HAVE_VALGRIND
 TESTS += \
@@ -920,6 +939,25 @@ TESTS +=  \
 endif # HAVE_VALGRIND
 endif # ENABLE_IMDOCKER_TESTS
 endif # ENABLE_IMDOCKER
+
+if ENABLE_IMHTTP
+TESTS += \
+	imhttp-post-payload.sh \
+	imhttp-post-payload-large.sh \
+	imhttp-post-payload-multi.sh \
+	imhttp-post-payload-multi-lf.sh \
+	imhttp-post-payload-compress.sh \
+	imhttp-getrequest-file.sh
+if HAVE_VALGRIND
+TESTS +=  \
+	imhttp-post-payload-vg.sh \
+	imhttp-post-payload-large-vg.sh \
+	imhttp-post-payload-multi-vg.sh \
+	imhttp-post-payload-multi-lf-vg.sh \
+	imhttp-post-payload-compress-vg.sh \
+	imhttp-getrequest-file-vg.sh
+endif # HAVE_VALGRIND
+endif # ENABLE_IMHTTP
 
 if ENABLE_OMRABBITMQ
 check_PROGRAMS += miniamqpsrvr
@@ -965,7 +1003,9 @@ TESTS +=  \
 	stats-cee.sh \
 	stats-json-es.sh \
 	dynstats_reset_without_pstats_reset.sh \
-	dynstats_prevent_premature_eviction.sh
+	dynstats_prevent_premature_eviction.sh \
+	omfwd_impstats-udp.sh \
+	omfwd_impstats-tcp.sh
 if HAVE_VALGRIND
 TESTS +=  \
 	dynstats-vg.sh \
@@ -994,6 +1034,7 @@ TESTS +=  \
 	imptcp_no_octet_counted.sh \
 	imptcp_multi_line.sh \
 	imptcp_spframingfix.sh \
+	imptcp_maxsessions.sh \
 	imptcp_nonProcessingPoller.sh \
 	imptcp_veryLargeOctateCountedMessages.sh \
 	imptcp-basic-hup.sh \
@@ -1002,7 +1043,8 @@ TESTS +=  \
 	rscript_random.sh \
 	rscript_hash32.sh \
 	rscript_hash64.sh \
-	rscript_replace.sh
+	rscript_replace.sh \
+	omfile-outchannel-many.sh
 if HAVE_VALGRIND
 TESTS +=  \
 	imptcp_conndrop-vg.sh
@@ -1157,6 +1199,7 @@ TESTS +=  \
 	sndrcv_tls_priorityString.sh \
 	sndrcv_tls_certvalid.sh \
 	sndrcv_tls_certvalid_expired.sh \
+	sndrcv_tls_certvalid_expired_defaultmode.sh \
 	imtcp-tls-gtls-x509fingerprint-invld.sh \
 	imtcp-tls-gtls-x509fingerprint.sh \
 	imtcp-tls-gtls-x509name-invld.sh \
@@ -1192,7 +1235,8 @@ TESTS +=  \
 	imtcp-tls-ossl-error-key2.sh
 if HAVE_VALGRIND
 TESTS += \
-	imtcp-tls-ossl-basic-vg.sh
+	imtcp-tls-ossl-basic-vg.sh \
+	imtcp-tls-ossl-basic-brokenhandshake-vg.sh
 endif
 endif
 
@@ -1223,6 +1267,7 @@ TESTS += sndrcv_relp.sh \
 	 imrelp-oversizeMode-truncate.sh \
 	 imrelp-oversizeMode-accept.sh \
 	 imrelp-invld-tlslib.sh \
+	 imrelp-bigmessage.sh \
 	 omrelp-invld-tlslib.sh \
 	 sndrcv_relp_dflt_pt.sh \
 	 glbl-oversizeMsg-log.sh \
@@ -1233,9 +1278,11 @@ TESTS += \
          sndrcv_relp_tls.sh \
          sndrcv_relp_tls_certvalid.sh \
          sndrcv_relp_tls_prio.sh \
+	 sndrcv_relp_tls_chainedcert.sh \
          relp_tls_certificate_not_found.sh \
 	 omrelp_wrong_authmode.sh \
-	 imrelp-tls.sh
+	 imrelp-tls.sh \
+	 imrelp-tls-chainedcert.sh
 if USE_RELPENGINESETTLSCFGCMD
 TESTS += \
 	 imrelp-tls-cfgcmd.sh \
@@ -1245,6 +1292,7 @@ endif # ENABLE_GNUTLS
 if HAVE_VALGRIND
 TESTS += \
 	 imrelp-basic-vg.sh \
+	 imrelp-sessionbreak-vg.sh \
 	 imrelp-manyconn-vg.sh
 endif # HAVE_VALGRIND
 endif
@@ -1253,6 +1301,7 @@ if ENABLE_OMUDPSPOOF
 TESTS += \
 	omudpspoof_errmsg_no_params.sh \
 	sndrcv_omudpspoof.sh \
+	sndrcv_omudpspoof-bigmsg.sh \
 	sndrcv_omudpspoof_nonstdpt.sh
 endif
 
@@ -1500,6 +1549,9 @@ EXTRA_DIST= \
 	smtradfile.sh \
 	smtradfile-vg.sh \
 	immark.sh \
+	immark-inputname.sh \
+	immark-ruleset.sh \
+	immark-ruleset-custom-msg.sh \
 	operatingstate-basic.sh \
 	operatingstate-empty.sh \
 	operatingstate-unclean.sh \
@@ -1566,6 +1618,7 @@ EXTRA_DIST= \
 	tls-certs/ca-key.pem \
 	tls-certs/ca.pem \
 	tls-certs/cert.pem \
+	tls-certs/certchained.pem \
 	tls-certs/key.pem \
 	tls-certs/ca-fail.pem \
 	tls-certs/cert-fail.pem \
@@ -1632,10 +1685,12 @@ EXTRA_DIST= \
 	diskq-rfc5424.sh \
 	rfc5424parser-sp_at_msg_start.sh \
 	diskqueue-full.sh \
+	diskqueue-fail.sh \
 	diskqueue.sh \
 	diskqueue-non-unique-prefix.sh \
 	arrayqueue.sh \
 	include-obj-text-from-file.sh \
+	include-obj-text-from-file-noexist.sh \
 	include-obj-outside-control-flow-vg.sh \
 	include-obj-in-if-vg.sh \
 	include-obj-text-vg.sh \
@@ -1678,6 +1733,12 @@ EXTRA_DIST= \
 	rscript_backticks_empty_envvar-vg.sh \
 	rscript_previous_action_suspended.sh \
 	rscript_str2num_negative.sh \
+	rscript_exists-yes.sh \
+	rscript_exists-yes2.sh \
+	rscript_exists-not1.sh \
+	rscript_exists-not2.sh \
+	rscript_exists-not3.sh \
+	rscript_exists-not4.sh \
 	rs-cnum.sh \
 	rs-int2hex.sh \
 	rs-substring.sh \
@@ -1736,6 +1797,7 @@ EXTRA_DIST= \
 	omfile-whitespace-filename.sh \
 	omfile-read-only.sh \
 	omfile-outchannel.sh \
+	omfile-outchannel-many.sh \
 	omfile_both_files_set.sh \
 	omfile_hup.sh \
 	omrabbitmq_no_params.sh \
@@ -1804,6 +1866,7 @@ EXTRA_DIST= \
 	now-utc-ymd.sh \
 	now-utc-casecmp.sh \
 	now-utc.sh \
+	now-unixtimestamp.sh \
 	faketime_common.sh \
 	imjournal-basic.sh \
 	imjournal-statefile.sh \
@@ -1957,6 +2020,8 @@ EXTRA_DIST= \
 	imtcp-tls-basic-vg.sh \
 	imtcp_incomplete_frame_at_end.sh \
 	imtcp-multiport.sh \
+	imtcp-bigmessage-octetcounting.sh \
+	imtcp-bigmessage-octetstuffing.sh \
 	udp-msgreduc-orgmsg-vg.sh \
 	udp-msgreduc-vg.sh \
 	manytcp-too-few-tls-vg.sh \
@@ -1974,6 +2039,7 @@ EXTRA_DIST= \
 	imtcp-tls-ossl-x509name.sh \
 	imtcp-tls-ossl-x509fingerprint.sh \
 	imtcp-tls-ossl-basic-vg.sh \
+	imtcp-tls-ossl-basic-brokenhandshake-vg.sh \
 	imtcp-tls-ossl-error-ca.sh \
 	imtcp-tls-ossl-error-cert.sh \
 	imtcp-tls-ossl-error-key.sh \
@@ -2061,6 +2127,8 @@ EXTRA_DIST= \
 	imrelp-oversizeMode-truncate.sh \
 	imrelp-oversizeMode-accept.sh \
 	imrelp-invld-tlslib.sh \
+	imrelp-bigmessage.sh \
+	imrelp-sessionbreak-vg.sh \
 	omrelp-invld-tlslib.sh \
 	glbl-oversizeMsg-log.sh \
 	glbl-oversizeMsg-truncate.sh \
@@ -2068,12 +2136,14 @@ EXTRA_DIST= \
 	sndrcv_relp.sh \
 	sndrcv_relp_rebind.sh \
 	sndrcv_relp_tls_prio.sh \
+	sndrcv_relp_tls_chainedcert.sh \
 	sndrcv_relp_tls.sh \
 	sndrcv_relp_tls_certvalid.sh \
 	relp_tls_certificate_not_found.sh \
 	omrelp_wrong_authmode.sh \
 	imrelp-tls.sh \
 	imrelp-tls-cfgcmd.sh \
+	imrelp-tls-chainedcert.sh \
 	sndrcv_relp_tls-cfgcmd.sh \
 	sndrcv_relp_dflt_pt.sh \
 	sndrcv_udp.sh \
@@ -2082,6 +2152,7 @@ EXTRA_DIST= \
 	sndrcv_udp_nonstdpt_v6.sh \
 	omudpspoof_errmsg_no_params.sh \
 	sndrcv_omudpspoof.sh \
+	sndrcv_omudpspoof-bigmsg.sh \
 	sndrcv_omudpspoof_nonstdpt.sh \
 	sndrcv_gzip.sh \
 	action-tx-single-processing.sh \
@@ -2098,6 +2169,20 @@ EXTRA_DIST= \
 	improg_prog_killonclose.sh \
 	improg_prog_simple-vg.sh \
 	improg_simple_multi.sh \
+	imhttp-post-payload.sh \
+	imhttp-post-payload-vg.sh \
+	imhttp-post-payload-large.sh \
+	imhttp-post-payload-large-vg.sh \
+	testsuites/imhttp-large-data.txt \
+	imhttp-post-payload-multi.sh \
+	imhttp-post-payload-multi-vg.sh \
+	imhttp-getrequest-file.sh \
+	imhttp-getrequest-file-vg.sh \
+	imhttp-post-payload-multi-lf.sh \
+	imhttp-post-payload-multi-lf-vg.sh \
+	imhttp-post-payload-compress.sh \
+	imhttp-post-payload-compress-vg.sh \
+	testsuites/docroot/file.txt \
 	omhttp-auth.sh \
 	omhttp-basic.sh \
 	omhttp-batch-fail-with-400.sh \
@@ -2110,6 +2195,8 @@ EXTRA_DIST= \
 	omhttp-batch-lokirest.sh \
 	omhttp-batch-newline.sh \
 	omhttp-retry.sh \
+	omhttp-httpheaderkey.sh \
+	omhttp-multiplehttpheaders.sh \
 	omhttp-auth-vg.sh \
 	omhttp-basic-vg.sh \
 	omhttp-batch-jsonarray-compress-vg.sh \
@@ -2210,6 +2297,8 @@ EXTRA_DIST= \
 	imfile-endregex-timeout-none.sh \
 	imfile-endregex-timeout-with-shutdown.sh \
 	imfile-endregex-timeout-with-shutdown-polling.sh \
+	imfile-escapelf.replacement.sh \
+	imfile-escapelf.replacement-empty.sh \
 	imfile-endmsg.regex.sh \
 	imfile-endmsg.regex-vg.sh \
 	imfile-endmsg.regex-with-example.sh \
@@ -2351,6 +2440,8 @@ EXTRA_DIST= \
 	testsuites/dynstats_input_more_2 \
 	no-dynstats-json.sh \
 	no-dynstats.sh \
+	omfwd_impstats-udp.sh \
+	omfwd_impstats-tcp.sh \
 	stats-json.sh \
 	stats-json-vg.sh \
 	stats-cee.sh \
@@ -2449,6 +2540,7 @@ EXTRA_DIST= \
 	testsuites/xlate_more_with_duplicates_and_nomatch.lkp_tbl \
 	testsuites/xlate_sparse_array_more_with_duplicates_and_nomatch.lkp_tbl \
 	json_var_cmpr.sh \
+	imptcp_maxsessions.sh \
 	imptcp_nonProcessingPoller.sh \
 	imptcp_veryLargeOctateCountedMessages.sh \
 	known_issues.supp \
@@ -2458,6 +2550,7 @@ EXTRA_DIST= \
 	CI/centos6-9.supp \
 	CI/centos7.supp \
 	CI/gcov.supp \
+	CI/ubuntu20.04.supp \
 	json_var_case.sh \
 	cfg.sh \
 	empty-prop-comparison.sh \
@@ -2468,6 +2561,7 @@ EXTRA_DIST= \
 	sndrcv_tls_priorityString.sh \
 	sndrcv_tls_certvalid.sh \
 	sndrcv_tls_certvalid_expired.sh \
+	sndrcv_tls_certvalid_expired_defaultmode.sh \
 	sndrcv_tls_certless_clientonly.sh \
 	sndrcv_tls_gtls_servercert_gtls_clientanon.sh \
 	sndrcv_tls_gtls_servercert_gtls_clientanon_legacy.sh \
@@ -2543,6 +2637,7 @@ msleep_SOURCES = msleep.c
 omrelp_dflt_port_SOURCES = omrelp_dflt_port.c
 mangle_qi_SOURCES = mangle_qi.c
 chkseq_SOURCES = chkseq.c
+check_relpEngineVersion = check_relpEngineVersion.c
 have_relpSrvSetOversizeMode = have_relpSrvSetOversizeMode.c
 have_relpEngineSetTLSLibByName = have_relpEngineSetTLSLibByName.c
 have_relpSrvSetTlsConfigCmd = have_relpSrvSetTlsConfigCmd.c

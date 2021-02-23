@@ -148,7 +148,14 @@ expand_backticks(char *const param)
 		estr = expand_backticks_echo(param);
 	} else if(strncmp(param, "cat ", sizeof("cat ")-1) == 0) {
 		const char *val = read_file(param+4);
-		estr = es_newStrFromCStr(val, strlen(val));
+		if(val == NULL) {
+			parser_errmsg("file could not be accessed for `%s`", param);
+			const char *errmsg = "/* file cound not be accessed - see"
+				"error messages */";
+			estr = es_newStrFromCStr(errmsg, strlen(errmsg));
+		} else {
+			estr = es_newStrFromCStr(val, strlen(val));
+		}
 		free((void*) val);
 	} else {
 		parser_errmsg("invalid backtick parameter `%s` - replaced by "
@@ -307,12 +314,13 @@ int fileno(FILE *stream);
 					        "escaped, problem string is: %s",
 						yytext); }
 <EXPR>[ \t\n]			{ cnfPrintToken(yytext); }
+<EXPR>"exists"			{ cnfPrintToken(yytext); return EXISTS; } /* special case function (see rainerscript.c) */
 <EXPR>[a-z][a-z0-9_]*		{ cnfPrintToken(yytext); yylval.estr = es_newStrFromCStr(yytext, yyleng);
 				  return FUNC; }
 <EXPR>.				{ cnfPrintToken(yytext); parser_errmsg("invalid character '%s' in expression "
 					        "- is there an invalid escape sequence somewhere?",
 						yytext); }
-<INCALL>[ \t\n]
+<INCALL>[ \t\n]		{ cnfPrintToken(yytext); }
 <INCALL>.			{ cnfPrintToken(yytext); parser_errmsg("invalid character '%s' in 'call' statement"
 					        "- is there an invalid escape sequence somewhere?",
 						yytext); }

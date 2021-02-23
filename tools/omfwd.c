@@ -57,6 +57,8 @@
 #include "errmsg.h"
 #include "unicode-helper.h"
 #include "parserif.h"
+#include "ratelimit.h"
+#include "statsobj.h"
 
 MODULE_TYPE_OUTPUT
 MODULE_TYPE_NOKEEP
@@ -70,6 +72,7 @@ DEFobjCurrIf(net)
 DEFobjCurrIf(netstrms)
 DEFobjCurrIf(netstrm)
 DEFobjCurrIf(tcpclt)
+DEFobjCurrIf(statsobj)
 
 
 /* some local constants (just) for better readybility */
@@ -99,6 +102,7 @@ typedef struct _instanceData {
 	int iKeepAliveIntvl;
 	int iKeepAliveProbes;
 	int iKeepAliveTime;
+	int iConErrSkip;    /* skipping excessive connection errors */
 	uchar *gnutlsPriorityString;
 	int ipfreebind;
 
@@ -119,6 +123,12 @@ typedef struct _instanceData {
 	uint8_t compressionMode;
 	int errsToReport;	/* max number of errors to report (per instance) */
 	sbool strmCompFlushOnTxEnd; /* flush stream compression on transaction end? */
+	unsigned int ratelimitInterval;
+	unsigned int ratelimitBurst;
+	ratelimit_t *ratelimiter;
+	statsobj_t *stats;		/* dynafile, primarily cache stats */
+	intctr_t sentBytes;
+	DEF_ATOMIC_HELPER_MUT64(mut_sentBytes)
 } instanceData;
 
 typedef struct wrkrInstanceData {
@@ -151,6 +161,7 @@ typedef struct configSettings_s {
 	int iKeepAliveIntvl;
 	int iKeepAliveProbes;
 	int iKeepAliveTime;
+	int iConErrSkip;
 	uchar *gnutlsPriorityString;
 	permittedPeers_t *pPermPeers;
 } configSettings_t;
@@ -184,9 +195,10 @@ static struct cnfparamdescr actpdescr[] = {
 	{ "maxerrormessages", eCmdHdlrInt, CNFPARAM_DEPRECATED },
 	{ "rebindinterval", eCmdHdlrInt, 0 },
 	{ "keepalive", eCmdHdlrBinary, 0 },
-	{ "keepalive.probes", eCmdHdlrPositiveInt, 0 },
-	{ "keepalive.time", eCmdHdlrPositiveInt, 0 },
-	{ "keepalive.interval", eCmdHdlrPositiveInt, 0 },
+	{ "keepalive.probes", eCmdHdlrNonNegInt, 0 },
+	{ "keepalive.time", eCmdHdlrNonNegInt, 0 },
+	{ "keepalive.interval", eCmdHdlrNonNegInt, 0 },
+	{ "conerrskip", eCmdHdlrNonNegInt, 0 },
 	{ "gnutlsprioritystring", eCmdHdlrString, 0 },
 	{ "streamdriver", eCmdHdlrGetWord, 0 },
 	{ "streamdrivermode", eCmdHdlrInt, 0 },
@@ -200,7 +212,9 @@ static struct cnfparamdescr actpdescr[] = {
 	{ "udp.sendtoall", eCmdHdlrBinary, 0 },
 	{ "udp.senddelay", eCmdHdlrInt, 0 },
 	{ "udp.sendbuf", eCmdHdlrSize, 0 },
-	{ "template", eCmdHdlrGetWord, 0 }
+	{ "template", eCmdHdlrGetWord, 0 },
+	{ "ratelimit.interval", eCmdHdlrInt, 0 },
+	{ "ratelimit.burst", eCmdHdlrInt, 0 }
 };
 static struct cnfparamblk actpblk =
 	{ CNFPARAMBLK_VERSION,
@@ -402,6 +416,8 @@ ENDisCompatibleWithFeature
 
 BEGINfreeInstance
 CODESTARTfreeInstance
+	if(pData->stats != NULL)
+		statsobj.Destruct(&(pData->stats));
 	free(pData->pszStrmDrvr);
 	free(pData->pszStrmDrvrAuthMode);
 	free(pData->pszStrmDrvrPermitExpiredCerts);
@@ -411,6 +427,11 @@ CODESTARTfreeInstance
 	free(pData->address);
 	free(pData->device);
 	net.DestructPermittedPeers(&pData->pPermPeers);
+	if (pData->ratelimiter != NULL){
+		ratelimitDestruct(pData->ratelimiter);
+		pData->ratelimiter = NULL;
+	}
+
 ENDfreeInstance
 
 
@@ -427,7 +448,10 @@ ENDfreeWrkrInstance
 
 BEGINdbgPrintInstInfo
 CODESTARTdbgPrintInstInfo
-	dbgprintf("%s", pData->target);
+	dbgprintf("omfwd\n");
+	dbgprintf("\ttarget='%s'\n", pData->target);
+	dbgprintf("\tratelimit.interval='%u'\n", pData->ratelimitInterval);
+	dbgprintf("\tratelimit.burst='%u'\n", pData->ratelimitBurst);
 ENDdbgPrintInstInfo
 
 
@@ -488,6 +512,8 @@ static rsRetVal UDPSend(wrkrInstanceData_t *__restrict__ const pWrkrData,
 						r->ai_addr, r->ai_addrlen);
 				if (lsent == (ssize_t) lenThisTry) {
 					bSendSuccess = RSTRUE;
+					ATOMIC_ADD_uint64(&pWrkrData->pData->sentBytes,
+						&pWrkrData->pData->mut_sentBytes, lenThisTry);
 					try_send = 0;
 					runSockArrayLoop = 0;
 				} else if(errno == EMSGSIZE) {
@@ -552,7 +578,7 @@ finalize_it:
 /* CODE FOR SENDING TCP MESSAGES */
 
 static rsRetVal
-TCPSendBufUncompressed(wrkrInstanceData_t *pWrkrData, uchar *buf, unsigned len)
+TCPSendBufUncompressed(wrkrInstanceData_t *pWrkrData, uchar *const buf, const unsigned len)
 {
 	DEFiRet;
 	unsigned alreadySent;
@@ -569,11 +595,35 @@ TCPSendBufUncompressed(wrkrInstanceData_t *pWrkrData, uchar *buf, unsigned len)
 		alreadySent += lenSend;
 	}
 
+	ATOMIC_ADD_uint64(&pWrkrData->pData->sentBytes, &pWrkrData->pData->mut_sentBytes, len);
+
 finalize_it:
 	if(iRet != RS_RET_OK) {
-		/* error! */
-		LogError(0, iRet, "omfwd: TCPSendBuf error %d, destruct TCP Connection to %s:%s",
-			iRet, pWrkrData->pData->target, pWrkrData->pData->port);
+		if(iRet == RS_RET_IO_ERROR) {
+			static unsigned int conErrCnt = 0;
+			const int skipFactor = pWrkrData->pData->iConErrSkip;
+			if (skipFactor <= 1)  {
+				/* All the connection errors are printed. */
+				LogError(0, iRet, "omfwd: remote server at %s:%s seems to have closed connection. "
+					"This often happens when the remote peer (or an interim system like a load "
+					"balancer or firewall) shuts down or aborts a connection. Rsyslog will "
+					"re-open the connection if configured to do so (we saw a generic IO Error, "
+					"which usually goes along with that behaviour).",
+					pWrkrData->pData->target, pWrkrData->pData->port);
+			} else if ((conErrCnt++ % skipFactor) == 0) {
+				/* Every N'th error message is printed where N is a skipFactor. */
+				LogError(0, iRet, "omfwd: remote server at %s:%s seems to have closed connection. "
+					"This often happens when the remote peer (or an interim system like a load "
+					"balancer or firewall) shuts down or aborts a connection. Rsyslog will "
+					"re-open the connection if configured to do so (we saw a generic IO Error, "
+					"which usually goes along with that behaviour). Note that the next %d "
+					"connection error messages will be skipped.",
+					pWrkrData->pData->target, pWrkrData->pData->port, skipFactor-1);
+			}
+		} else {
+			LogError(0, iRet, "omfwd: TCPSendBuf error %d, destruct TCP Connection to %s:%s",
+				iRet, pWrkrData->pData->target, pWrkrData->pData->port);
+		}
 		DestructTCPInstanceData(pWrkrData);
 		iRet = RS_RET_SUSPENDED;
 	}
@@ -762,10 +812,10 @@ static rsRetVal TCPSendInit(void *pvData)
 		if(pData->pszStrmDrvrAuthMode != NULL) {
 			CHKiRet(netstrm.SetDrvrAuthMode(pWrkrData->pNetstrm, pData->pszStrmDrvrAuthMode));
 		}
-		if(pData->pszStrmDrvrPermitExpiredCerts != NULL) {
-			CHKiRet(netstrm.SetDrvrPermitExpiredCerts(pWrkrData->pNetstrm,
-				pData->pszStrmDrvrPermitExpiredCerts));
-		}
+		/* Call SetDrvrPermitExpiredCerts required
+		 * when param is NULL default handling for ExpiredCerts is set! */
+		CHKiRet(netstrm.SetDrvrPermitExpiredCerts(pWrkrData->pNetstrm,
+			pData->pszStrmDrvrPermitExpiredCerts));
 
 		if(pData->pPermPeers != NULL) {
 			CHKiRet(netstrm.SetDrvrPermPeers(pWrkrData->pNetstrm, pData->pPermPeers));
@@ -1052,13 +1102,31 @@ finalize_it:
 
 BEGINcommitTransaction
 	unsigned i;
+	char namebuf[264]; /* 256 for FGDN, 5 for port and 3 for transport => 264 */
 CODESTARTcommitTransaction
 	CHKiRet(doTryResume(pWrkrData));
 
 	DBGPRINTF(" %s:%s/%s\n", pWrkrData->pData->target, pWrkrData->pData->port,
 		 pWrkrData->pData->protocol == FORW_UDP ? "udp" : "tcp");
 
+	if(pWrkrData->pData->ratelimiter) {
+		snprintf(namebuf, sizeof namebuf, "%s:[%s]:%s",
+			pWrkrData->pData->protocol == FORW_UDP ? "udp" : "tcp",
+			pWrkrData->pData->target,
+			pWrkrData->pData->port);
+	}
+
 	for(i = 0 ; i < nParams ; ++i) {
+		/* If rate limiting is enabled, check whether this message has to be discarded */
+		if(pWrkrData->pData->ratelimiter) {
+			iRet = ratelimitMsgCount(pWrkrData->pData->ratelimiter, 0, namebuf);
+			if (iRet == RS_RET_DISCARDMSG) {
+				iRet = RS_RET_OK;
+				continue;
+			} else if (iRet != RS_RET_OK) {
+				LogError(0, RS_RET_ERR, "omfwd: error during rate limit : %d.\n",iRet);
+			}
+		}
 		iRet = processMsg(pWrkrData, &actParam(pParams, 1, i, 0));
 		if(iRet != RS_RET_OK && iRet != RS_RET_DEFER_COMMIT && iRet != RS_RET_PREVIOUS_COMMITTED)
 			FINALIZE;
@@ -1137,6 +1205,7 @@ setInstParamDefaults(instanceData *pData)
 	pData->iKeepAliveProbes = 0;
 	pData->iKeepAliveIntvl = 0;
 	pData->iKeepAliveTime = 0;
+	pData->iConErrSkip = 0;
 	pData->gnutlsPriorityString = NULL;
 	pData->bResendLastOnRecon = 0;
 	pData->bSendToAll = -1;  /* unspecified */
@@ -1147,7 +1216,36 @@ setInstParamDefaults(instanceData *pData)
 	pData->strmCompFlushOnTxEnd = 1;
 	pData->compressionMode = COMPRESS_NEVER;
 	pData->ipfreebind = IPFREEBIND_ENABLED_WITH_LOG;
+	pData->ratelimiter = NULL;
+	pData->ratelimitInterval = 0;
+	pData->ratelimitBurst = 200;
 }
+
+
+static rsRetVal
+setupInstStatsCtrs(instanceData *__restrict__ const pData)
+{
+	uchar ctrName[512];
+	DEFiRet;
+
+	/* support statistics gathering */
+	snprintf((char*)ctrName, sizeof(ctrName), "%s-%s-%s",
+		(pData->protocol == FORW_TCP) ? "TCP" : "UDP",
+		pData->target, pData->port);
+	ctrName[sizeof(ctrName)-1] = '\0'; /* be on the save side */
+	CHKiRet(statsobj.Construct(&(pData->stats)));
+	CHKiRet(statsobj.SetName(pData->stats, ctrName));
+	CHKiRet(statsobj.SetOrigin(pData->stats, (uchar*)"omfwd"));
+	pData->sentBytes = 0;
+	INIT_ATOMIC_HELPER_MUT64(pData->mut_sentBytes);
+	CHKiRet(statsobj.AddCounter(pData->stats, UCHAR_CONSTANT("bytes.sent"),
+		ctrType_IntCtr, CTR_FLAG_RESETTABLE, &(pData->sentBytes)));
+	CHKiRet(statsobj.ConstructFinalize(pData->stats));
+
+finalize_it:
+	RETiRet;
+}
+
 
 BEGINnewActInst
 	struct cnfparamvals *pvals;
@@ -1227,6 +1325,8 @@ CODESTARTnewActInst
 			pData->iKeepAliveIntvl = (int) pvals[i].val.d.n;
 		} else if(!strcmp(actpblk.descr[i].name, "keepalive.time")) {
 			pData->iKeepAliveTime = (int) pvals[i].val.d.n;
+		} else if(!strcmp(actpblk.descr[i].name, "conerrskip")) {
+			pData->iConErrSkip = (int) pvals[i].val.d.n;
 		} else if(!strcmp(actpblk.descr[i].name, "gnutlsprioritystring")) {
 			pData->gnutlsPriorityString = (uchar*)es_str2cstr(pvals[i].val.d.estr, NULL);
 		} else if(!strcmp(actpblk.descr[i].name, "streamdriver")) {
@@ -1329,11 +1429,20 @@ CODESTARTnewActInst
 			free(cstr);
 		} else if(!strcmp(actpblk.descr[i].name, "ipfreebind")) {
 			pData->ipfreebind = (int) pvals[i].val.d.n;
+		} else if(!strcmp(actpblk.descr[i].name, "ratelimit.burst")) {
+			pData->ratelimitBurst = (unsigned int) pvals[i].val.d.n;
+		} else if(!strcmp(actpblk.descr[i].name, "ratelimit.interval")) {
+			pData->ratelimitInterval = (unsigned int) pvals[i].val.d.n;
 		} else {
 			LogError(0, RS_RET_INTERNAL_ERROR,
 				"omfwd: program error, non-handled parameter '%s'",
 				actpblk.descr[i].name);
 		}
+	}
+
+	/* check if no port is set. If so, we use the IANA-assigned port of 514 */
+	if(pData->port == NULL) {
+		CHKmalloc(pData->port = strdup("514"));
 	}
 
 	if(complevel != -1) {
@@ -1364,6 +1473,15 @@ CODESTARTnewActInst
 		LogError(0, RS_RET_PARAM_ERROR,
 			 "omfwd: parameter \"address\" not supported for tcp -- ignored");
 	}
+
+	if( pData->ratelimitInterval > 0) {
+		CHKiRet(ratelimitNew(&pData->ratelimiter, "omfwd", NULL));
+		ratelimitSetLinuxLike(pData->ratelimiter, pData->ratelimitInterval, pData->ratelimitBurst);
+		ratelimitSetNoTimeCache(pData->ratelimiter);
+	}
+
+	setupInstStatsCtrs(pData);
+
 CODE_STD_FINALIZERnewActInst
 	cnfparamvalsDestruct(pvals, &actpblk);
 ENDnewActInst
@@ -1517,6 +1635,7 @@ CODE_STD_STRING_REQUESTparseSelectorAct(1)
 	pData->iKeepAliveProbes = cs.iKeepAliveProbes;
 	pData->iKeepAliveIntvl = cs.iKeepAliveIntvl;
 	pData->iKeepAliveTime = cs.iKeepAliveTime;
+	pData->iConErrSkip = cs.iConErrSkip;
 
 	/* process template */
 	CHKiRet(cflineParseTemplateName(&p, *ppOMSR, 0, OMSR_NO_RQD_TPL_OPTS, getDfltTpl()));
@@ -1556,6 +1675,7 @@ CODESTARTmodExit
 	objRelease(netstrm, LM_NETSTRMS_FILENAME);
 	objRelease(netstrms, LM_NETSTRMS_FILENAME);
 	objRelease(tcpclt, LM_TCPCLT_FILENAME);
+	objRelease(statsobj, CORE_COMPONENT);
 	freeConfigVars();
 ENDmodExit
 
@@ -1586,6 +1706,7 @@ static rsRetVal resetConfigVariables(uchar __attribute__((unused)) *pp, void __a
 	cs.iKeepAliveProbes = 0;
 	cs.iKeepAliveIntvl = 0;
 	cs.iKeepAliveTime = 0;
+	cs.iConErrSkip = 0;
 
 	return RS_RET_OK;
 }
@@ -1598,6 +1719,7 @@ INITLegCnfVars
 CODEmodInit_QueryRegCFSLineHdlr
 	CHKiRet(objUse(glbl, CORE_COMPONENT));
 	CHKiRet(objUse(net,LM_NET_FILENAME));
+	CHKiRet(objUse(statsobj, CORE_COMPONENT));
 
 	CHKiRet(regCfSysLineHdlr((uchar *)"actionforwarddefaulttemplate", 0, eCmdHdlrGetWord,
 		setLegacyDfltTpl, NULL, NULL));
@@ -1626,6 +1748,3 @@ CODEmodInit_QueryRegCFSLineHdlr
 	CHKiRet(omsdRegCFSLineHdlr((uchar *)"resetconfigvariables", 1, eCmdHdlrCustomHandler,
 		resetConfigVariables, NULL, STD_LOADABLE_MODULE_ID));
 ENDmodInit
-
-/* vim:set ai:
- */

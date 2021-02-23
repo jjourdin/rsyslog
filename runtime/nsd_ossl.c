@@ -51,7 +51,6 @@
 #include "nsdsel_ossl.h"
 #include "nsd_ossl.h"
 #include "unicode-helper.h"
-
 /* things to move to some better place/functionality - TODO */
 // #define CRLFILE "crl.pem"
 
@@ -462,7 +461,7 @@ osslGlblInit(void)
 		osslLastSSLErrorMsg(0, NULL, LOG_ERR, "osslGlblInit");
 		ABORT_FINALIZE(RS_RET_TLS_CERT_ERR);
 	}
-	if(bHaveCert == 1 && SSL_CTX_use_certificate_file(ctx, certFile, SSL_FILETYPE_PEM) != 1) {
+	if(bHaveCert == 1 && SSL_CTX_use_certificate_chain_file(ctx, certFile) != 1) {
 		LogError(0, RS_RET_TLS_CERT_ERR, "Error: Certificate could not be accessed. "
 				"Check at least: 1) file path is correct, 2) file exist, "
 				"3) permissions are correct, 4) file content is correct. "
@@ -578,7 +577,7 @@ sslerr:
 		}
 		else if(err != SSL_ERROR_WANT_READ &&
 			err != SSL_ERROR_WANT_WRITE) {
-			DBGPRINTF("osslRecordRecv: SSL_get_error = %d\n", err);
+			DBGPRINTF("osslRecordRecv: SSL_get_error #1 = %d, lenRcvd=%zd\n", err, lenRcvd);
 			/* Save errno */
 			local_errno = errno;
 
@@ -593,7 +592,7 @@ sslerr:
 				ABORT_FINALIZE(RS_RET_NO_ERRCODE);
 			}
 		} else {
-			DBGPRINTF("osslRecordRecv: SSL_get_error = %d\n", err);
+			DBGPRINTF("osslRecordRecv: SSL_get_error #2 = %d, lenRcvd=%zd\n", err, lenRcvd);
 			pThis->rtryCall =  osslRtry_recv;
 			pThis->rtryOsslErr = err; /* Store SSL ErrorCode into*/
 			ABORT_FINALIZE(RS_RET_RETRY);
@@ -603,8 +602,8 @@ sslerr:
 // TODO: Check if MORE retry logic needed?
 
 finalize_it:
-	dbgprintf("osslRecordRecv return. nsd %p, iRet %d, lenRcvd %d, lenRcvBuf %d, ptrRcvBuf %d\n",
-	pThis, iRet, (int) lenRcvd, pThis->lenRcvBuf, pThis->ptrRcvBuf);
+	dbgprintf("osslRecordRecv return. nsd %p, iRet %d, lenRcvd %zd, lenRcvBuf %d, ptrRcvBuf %d\n",
+	pThis, iRet, lenRcvd, pThis->lenRcvBuf, pThis->ptrRcvBuf);
 	RETiRet;
 }
 
@@ -619,7 +618,11 @@ osslInitSession(nsd_ossl_t *pThis) /* , nsd_ossl_t *pServer) */
 	if(!(pThis->ssl = SSL_new(ctx))) {
 		pThis->ssl = NULL;
 		osslLastSSLErrorMsg(0, pThis->ssl, LOG_ERR, "osslInitSession");
+		ABORT_FINALIZE(RS_RET_NO_ERRCODE);
 	}
+
+	// Set SSL_MODE_AUTO_RETRY to SSL obj
+	SSL_set_mode(pThis->ssl, SSL_MODE_AUTO_RETRY);
 
 	if (pThis->authMode != OSSL_AUTH_CERTANON) {
 		dbgprintf("osslInitSession: enable certificate checking (Mode=%d, VerifyDepth=%d)\n",
@@ -633,7 +636,7 @@ osslInitSession(nsd_ossl_t *pThis) /* , nsd_ossl_t *pServer) */
 
 	if (bAnonInit == 1) { /* no mutex needed, read-only after init */
 		/* Allow ANON Ciphers */
-		#if OPENSSL_VERSION_NUMBER >= 0x10100000L
+		#if OPENSSL_VERSION_NUMBER >= 0x10100000L && !defined(LIBRESSL_VERSION_NUMBER)
 		 /* NOTE: do never use: +eNULL, it DISABLES encryption! */
 		strncpy(pristringBuf, "ALL:+COMPLEMENTOFDEFAULT:+ADH:+ECDH:+aNULL@SECLEVEL=0",
 			sizeof(pristringBuf));
@@ -717,8 +720,10 @@ osslChkPeerFingerprint(nsd_ossl_t *pThis, X509 *pCert)
 		dbgprintf("osslChkPeerFingerprint: invalid peer fingerprint, not permitted to talk to it\n");
 		if(pThis->bReportAuthErr == 1) {
 			errno = 0;
-			LogError(0, RS_RET_INVALID_FINGERPRINT, "error: peer fingerprint '%s' unknown - we are "
-					"not permitted to talk to it", cstrGetSzStrNoNULL(pstrFingerprint));
+			LogError(0, RS_RET_INVALID_FINGERPRINT,
+			"nsd_ossl:error:"
+			" peer fingerprint '%s' unknown - we are "
+			"not permitted to talk to it", cstrGetSzStrNoNULL(pstrFingerprint));
 			pThis->bReportAuthErr = 0;
 		}
 		ABORT_FINALIZE(RS_RET_INVALID_FINGERPRINT);
@@ -828,7 +833,7 @@ osslChkPeerName(nsd_ossl_t *pThis, X509 *pCert)
 		if(pThis->bReportAuthErr == 1) {
 			cstrFinalize(pStr);
 			errno = 0;
-			LogError(0, RS_RET_INVALID_FINGERPRINT, "error: peer name not authorized -  "
+			LogError(0, RS_RET_INVALID_FINGERPRINT, "nsd_ossl:error: peer name not authorized -  "
 					"not permitted to talk to it. Names: %s",
 					cstrGetSzStrNoNULL(pStr));
 			pThis->bReportAuthErr = 0;
@@ -865,7 +870,7 @@ osslChkPeerID(nsd_ossl_t *pThis)
 	if ( certpeer == NULL ) {
 		if(pThis->bReportAuthErr == 1) {
 			errno = 0;
-			LogError(0, RS_RET_TLS_NO_CERT, "error: peer did not provide a certificate, "
+			LogError(0, RS_RET_TLS_NO_CERT, "nsd_ossl:error: peer did not provide a certificate, "
 					"not permitted to talk to it");
 			pThis->bReportAuthErr = 0;
 		}
@@ -900,19 +905,21 @@ osslChkPeerCertValidity(nsd_ossl_t *pThis)
 		if (iVerErr == X509_V_ERR_CERT_HAS_EXPIRED) {
 			if (pThis->permitExpiredCerts == OSSL_EXPIRED_DENY) {
 				LogError(0, RS_RET_CERT_EXPIRED,
-					"CertValidity check - not permitted to talk to peer: certificate expired: %s",
+					"nsd_ossl:CertValidity check"
+"- not permitted to talk to peer: certificate expired: %s",
 					X509_verify_cert_error_string(iVerErr));
 				ABORT_FINALIZE(RS_RET_CERT_EXPIRED);
 			} else if (pThis->permitExpiredCerts == OSSL_EXPIRED_WARN) {
 				LogMsg(0, RS_RET_NO_ERRCODE, LOG_WARNING,
-					"CertValidity check - warning talking to peer: certificate expired: %s",
+					"nsd_ossl:CertValidity check"
+"- warning talking to peer: certificate expired: %s",
 					X509_verify_cert_error_string(iVerErr));
 			} else {
 				dbgprintf("osslChkPeerCertValidity: talking to peer: certificate expired: %s\n",
 					X509_verify_cert_error_string(iVerErr));
 			}/* Else do nothing */
 		} else {
-			LogError(0, RS_RET_CERT_INVALID, "not permitted to talk to peer: "
+			LogError(0, RS_RET_CERT_INVALID, "nsd_ossl:not permitted to talk to peer: "
 				"certificate validation failed: %s", X509_verify_cert_error_string(iVerErr));
 			ABORT_FINALIZE(RS_RET_CERT_INVALID);
 		}
@@ -968,6 +975,7 @@ osslGlblExit(void)
 {
 	DEFiRet;
 	DBGPRINTF("openssl: entering osslGlblExit\n");
+	SSL_CTX_free(ctx);
 	ENGINE_cleanup();
 	ERR_free_strings();
 	EVP_cleanup();
@@ -1011,15 +1019,17 @@ osslEndSess(nsd_ossl_t *pThis)
 			int iBytesRet = SSL_read(pThis->ssl, rcvBuf, NSD_OSSL_MAX_RCVBUF);
 			DBGPRINTF("osslEndSess: Forcing ssl shutdown SSL_read (%d) to do a bidirectional shutdown\n",
 				iBytesRet);
+			LogMsg(0, RS_RET_NO_ERRCODE, LOG_INFO, "nsd_ossl:"
+			"TLS session terminated with remote syslog server.");
 			DBGPRINTF("osslEndSess: session closed (un)successfully \n");
 		} else {
+			LogMsg(0, RS_RET_NO_ERRCODE, LOG_INFO, "nsd_ossl:"
+			"TLS session terminated with remote syslog server.");
 			DBGPRINTF("osslEndSess: session closed successfully \n");
 		}
 
 		/* Session closed */
 		pThis->bHaveSess = 0;
-		SSL_free(pThis->ssl);
-		pThis->ssl = NULL;
 	}
 
 	RETiRet;
@@ -1038,8 +1048,15 @@ ENDobjConstruct(nsd_ossl)
 PROTOTYPEobjDestruct(nsd_ossl);
 BEGINobjDestruct(nsd_ossl) /* be sure to specify the object type also in END and CODESTART macros! */
 CODESTARTobjDestruct(nsd_ossl)
+	DBGPRINTF("nsd_ossl_destruct: [%p] Mode %d\n", pThis, pThis->iMode);
 	if(pThis->iMode == 1) {
 		osslEndSess(pThis);
+	}
+	/* Free SSL obj also if we do not have a session - or are NOT in TLS mode! */
+	if (pThis->ssl != NULL) {
+		DBGPRINTF("nsd_ossl_destruct: [%p] FREE pThis->ssl \n", pThis);
+		SSL_free(pThis->ssl);
+		pThis->ssl = NULL;
 	}
 
 	if(pThis->pTcp != NULL) {
@@ -1363,10 +1380,24 @@ osslPostHandshakeCheck(nsd_ossl_t *pNsd)
 	/* Some extra output for debugging openssl */
 	if (SSL_get_shared_ciphers(pNsd->ssl,szDbg, sizeof szDbg) != NULL)
 		dbgprintf("osslPostHandshakeCheck: Debug Shared ciphers = %s\n", szDbg);
+
+	#if OPENSSL_VERSION_NUMBER >= 0x10002000L
+	if(SSL_get_shared_curve(pNsd->ssl, -1) == 0) {
+		LogError(0, RS_RET_NO_ERRCODE, "nsd_ossl:"
+"No shared curve between syslog client and server.");
+	}
+	#endif
 	sslCipher = (const SSL_CIPHER*) SSL_get_current_cipher(pNsd->ssl);
-	if (sslCipher != NULL)
+	if (sslCipher != NULL){
+		if(SSL_CIPHER_get_version(sslCipher) == NULL) {
+			LogError(0, RS_RET_NO_ERRCODE, "nsd_ossl:"
+		"TLS version mismatch between syslog client and server.");
+		}
 		dbgprintf("osslPostHandshakeCheck: Debug Version: %s Name: %s\n",
 			SSL_CIPHER_get_version(sslCipher), SSL_CIPHER_get_name(sslCipher));
+	}else {
+		LogError(0, RS_RET_NO_ERRCODE, "nsd_ossl:No shared ciphers between syslog client and server.");
+	}
 
 	FINALIZE;
 
@@ -1415,6 +1446,8 @@ osslHandshakeCheck(nsd_ossl_t *pNsd)
 				resErr == SSL_ERROR_WANT_WRITE) {
 				pNsd->rtryCall = osslRtry_handshake;
 				pNsd->rtryOsslErr = resErr; /* Store SSL ErrorCode into*/
+				LogError(0, RS_RET_NO_ERRCODE, "nsd_ossl:"
+"TLS handshake failed between syslog client and server.");
 				dbgprintf("osslHandshakeCheck: OpenSSL Client handshake does not complete "
 					"immediately - setting to retry (this is OK and normal)\n");
 				FINALIZE;
@@ -1705,6 +1738,8 @@ Connect(nsd_t *pNsd, int family, uchar *port, uchar *host, char *device)
 	conn = BIO_new_socket(pPtcp->sock, BIO_CLOSE /*BIO_NOCLOSE*/);
 	dbgprintf("Connect: Init conn BIO[%p] done\n", (void *)conn);
 
+	LogMsg(0, RS_RET_NO_ERRCODE, LOG_INFO, "nsd_ossl:"
+"TLS Connection initiated with remote syslog server.");
 	/*if we reach this point we are in tls mode */
 	DBGPRINTF("Connect: TLS Mode\n");
 	if(!(pThis->ssl = SSL_new(ctx))) {
@@ -1712,6 +1747,9 @@ Connect(nsd_t *pNsd, int family, uchar *port, uchar *host, char *device)
 		osslLastSSLErrorMsg(0, pThis->ssl, LOG_ERR, "Connect");
 		ABORT_FINALIZE(RS_RET_NO_ERRCODE);
 	}
+
+	// Set SSL_MODE_AUTO_RETRY to SSL obj
+	SSL_set_mode(pThis->ssl, SSL_MODE_AUTO_RETRY);
 
 	if (pThis->authMode != OSSL_AUTH_CERTANON) {
 		dbgprintf("Connect: enable certificate checking (Mode=%d, VerifyDepth=%d)\n",
@@ -1725,7 +1763,7 @@ Connect(nsd_t *pNsd, int family, uchar *port, uchar *host, char *device)
 
 	if (bAnonInit == 1) { /* no mutex needed, read-only after init */
 		/* Allow ANON Ciphers */
-		#if OPENSSL_VERSION_NUMBER >= 0x10100000L
+		#if OPENSSL_VERSION_NUMBER >= 0x10100000L && !defined(LIBRESSL_VERSION_NUMBER)
 		 /* NOTE: do never use: +eNULL, it DISABLES encryption! */
 		strncpy(pristringBuf, "ALL:+COMPLEMENTOFDEFAULT:+ADH:+ECDH:+aNULL@SECLEVEL=0",
 			sizeof(pristringBuf));
@@ -1789,7 +1827,7 @@ SetGnutlsPriorityString(__attribute__((unused)) nsd_t *pNsd, __attribute__((unus
 		RETiRet;
 	} else {
 		dbgprintf("gnutlsPriorityString: set to '%s'\n", gnutlsPriorityString);
-#if OPENSSL_VERSION_NUMBER >= 0x10002000L
+#if OPENSSL_VERSION_NUMBER >= 0x10002000L && !defined(LIBRESSL_VERSION_NUMBER)
 		char *pCurrentPos;
 		char *pNextPos;
 		char *pszCmd;
@@ -1859,8 +1897,8 @@ SetGnutlsPriorityString(__attribute__((unused)) nsd_t *pNsd, __attribute__((unus
 		}
 #else
 		dbgprintf("gnutlsPriorityString: set to '%s'\n", gnutlsPriorityString);
-		LogError(0, RS_RET_SYS_ERR, "Warning: OpenSSL Version too old to set gnutlsPriorityString ('%s')"
-			"by SSL_CONF_cmd API. For more see: "
+		LogError(0, RS_RET_SYS_ERR, "Warning: TLS library does not support SSL_CONF_cmd API"
+			"(maybe it is too old?). Cannot use gnutlsPriorityString ('%s'). For more see: "
 			"https://www.rsyslog.com/doc/master/configuration/modules/imtcp.html#gnutlsprioritystring",
 			gnutlsPriorityString);
 #endif

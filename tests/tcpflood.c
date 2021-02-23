@@ -167,7 +167,7 @@ char *test_rs_strerror_r(int errnum, char *buf, size_t buflen) {
 #define NETTEST_INPUT_CONF_FILE "nettest.input.conf"
 /* name of input file, must match $IncludeConfig in .conf files */
 
-#define MAX_EXTRADATA_LEN 200*1024
+#define MAX_EXTRADATA_LEN 512*1024
 #define MAX_SENDBUF 2 * MAX_EXTRADATA_LEN
 #define MAX_RCVBUF 16 * 1024 + 1/* TLS RFC 8449: max size of buffer for message reception */
 
@@ -279,6 +279,25 @@ static void relp_dbgprintf(char __attribute__((unused)) *fmt, ...) {
 
 static relpEngine_t *pRelpEngine;
 #define CHKRELP(f) if(f != RELP_RET_OK) { fprintf(stderr, "%s\n", #f); exit(1); }
+
+static void
+onErr(void *pUsr, char *objinfo, char* errmesg, __attribute__((unused)) relpRetVal errcode)
+{
+	fprintf(stderr, "tcpflood: onErr '%s'\n", errmesg);
+}
+
+static void
+onGenericErr(char *objinfo, char* errmesg, __attribute__((unused)) relpRetVal errcode)
+{
+	fprintf(stderr, "tcpflood: onGenericErr '%s'\n", errmesg);
+}
+
+static void
+onAuthErr(void *pUsr, char *authinfo, char* errmesg, __attribute__((unused)) relpRetVal errcode)
+{
+	fprintf(stderr, "tcpflood: onAuthErr '%s' peer '%s'\n", errmesg, authinfo);
+}
+
 static void
 initRELP_PLAIN(void)
 {
@@ -287,6 +306,11 @@ initRELP_PLAIN(void)
 		verbose ? relp_dbgprintf : NULL));
 	CHKRELP(relpEngineSetEnableCmd(pRelpEngine, (unsigned char*)"syslog",
 		eRelpCmdState_Required));
+	/* Error output support */
+	CHKRELP(relpEngineSetOnErr(pRelpEngine, onErr));
+	CHKRELP(relpEngineSetOnGenericErr(pRelpEngine, onGenericErr));
+	CHKRELP(relpEngineSetOnAuthErr(pRelpEngine, onAuthErr));
+
 }
 #endif /* #ifdef ENABLE_RELP */
 
@@ -1178,7 +1202,7 @@ initTLS(void)
 				" Is the file at the right path? And do we have the permissions?");
 		exit(1);
 	}
-	if(SSL_CTX_use_certificate_file(ctx, tlsCertFile, SSL_FILETYPE_PEM) != 1) {
+	if(SSL_CTX_use_certificate_chain_file(ctx, tlsCertFile) != 1) {
 		printf("tcpflood: error cert file could not be accessed -- have you mixed up key and certificate?\n");
 		printf("If in doubt, try swapping the files in -z/-Z\n");
 		printf("Certifcate is: '%s'\n", tlsCertFile);
@@ -1200,7 +1224,7 @@ initTLS(void)
 
 	/* Check for Custom Config string */
 	if (customConfig != NULL){
-#if OPENSSL_VERSION_NUMBER >= 0x10002000L
+#if OPENSSL_VERSION_NUMBER >= 0x10002000L && !defined(LIBRESSL_VERSION_NUMBER)
 	char *pCurrentPos;
 	char *pNextPos;
 	char *pszCmd;
@@ -1254,7 +1278,7 @@ initTLS(void)
 		printf("tcpflood: error, invalid value for -k: %s\n", customConfig);
 	}
 #else
-	printf("tcpflood: error, OpenSSL Version too old, SSL_CONF_cmd API is not supported.");
+	printf("tcpflood: TLS library does not support SSL_CONF_cmd API (maybe it is too old?).");
 #endif
 	}
 

@@ -180,9 +180,9 @@ static struct cnfparamdescr modpdescr[] = {
 	{ "streamdriver.TlsVerifyDepth", eCmdHdlrPositiveInt, 0 },
 	{ "permittedpeer", eCmdHdlrArray, 0 },
 	{ "keepalive", eCmdHdlrBinary, 0 },
-	{ "keepalive.probes", eCmdHdlrPositiveInt, 0 },
-	{ "keepalive.time", eCmdHdlrPositiveInt, 0 },
-	{ "keepalive.interval", eCmdHdlrPositiveInt, 0 },
+	{ "keepalive.probes", eCmdHdlrNonNegInt, 0 },
+	{ "keepalive.time", eCmdHdlrNonNegInt, 0 },
+	{ "keepalive.interval", eCmdHdlrNonNegInt, 0 },
 	{ "gnutlsprioritystring", eCmdHdlrString, 0 },
 	{ "preservecase", eCmdHdlrBinary, 0 }
 };
@@ -397,9 +397,9 @@ addListner(modConfData_t *modConf, instanceConf_t *inst)
 		if(modConf->pszStrmDrvrAuthMode != NULL) {
 			CHKiRet(tcpsrv.SetDrvrAuthMode(pOurTcpsrv, modConf->pszStrmDrvrAuthMode));
 		}
-		if(modConf->pszStrmDrvrPermitExpiredCerts != NULL) {
-			CHKiRet(tcpsrv.SetDrvrPermitExpiredCerts(pOurTcpsrv, modConf->pszStrmDrvrPermitExpiredCerts));
-		}
+		/* Call SetDrvrPermitExpiredCerts required
+		 * when param is NULL default handling for ExpiredCerts is set! */
+		CHKiRet(tcpsrv.SetDrvrPermitExpiredCerts(pOurTcpsrv, modConf->pszStrmDrvrPermitExpiredCerts));
 		if(pPermPeersRoot != NULL) {
 			CHKiRet(tcpsrv.SetDrvrPermPeers(pOurTcpsrv, pPermPeersRoot));
 		}

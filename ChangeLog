@@ -1,5 +1,513 @@
 ----------------------------------------------------------------------------------------
+Scheduled Release 8.2102.0 (aka 2021.02) 2021-02-16
+- 2021-02-15: omfwd: add stats counter for sent bytes
+  Thanks to John Chivian for suggesting this feature.
+- 2021-02-15: omfwd: add error reporting configuration option
+  RSyslog on a plain TCP cannot guarantee the message delivery
+  without using RELP protocol. Besides that the logs may be
+  flooded with connection errors making the rest of messages
+  difficult to find. To alleviate the problem (see issue 3910),
+  this patch adds a configuration option that enables to reduce
+  the number of network errors logged and reported.
+  For example, if each 10th network error message should be logged,
+  the rsyslog configuration has to be updated as follows.
+  action(type="omfwd" Target="<IP_ADDR>" Port="<PORT>" Protocol="tcp" ConErrSkip="10")
+  Thanks to Libor Bukata for the patch.
+- 2021-02-15: action stats counter bugfix: failure count was not properly incremented
+  In some cases the counter was not incremented, most notably with transaction-enabled
+  actions.
+  Thanks to github user thinkst-marco for the patch.
+- 2021-02-15: action stats counter bugfix: resume count was not incremented
+  And so it always stayed at zero.
+  Thanks to github user thinkst-marco for the patch.
+- 2021-02-15: omfwd bugfix: segfault or error if port not given
+  If omfwd is configured via RainerScript config format and the "port"
+  parameter is not given, a segfault will most likely happen on
+  connection establishment for TCP connections. For UDP, this is
+  usually not the case.
+  Alternatively, in any case, errors may happen.
+  Note that the segfault will usually happen right on restart so this
+  was easy to detect.
+  We did not receive reports from practice. Instead, we found the bug
+  while conducting other work.
+- 2021-01-29: lookup table bugfix: data race on lookup table reload
+  A data race could happen when a lookup table was reloaded. We found
+  this while moving to newer version of TSAN, but have no matching
+  report from practice. However, there is a potential for this to cause
+  a segfault under "bad circumstances".
+- 2021-01-18: testbench modernization
+  Bump dependency versions, use newer distro versions for some tests.
+  Make kafka distcheck separate to help diagnose flaky kafka tests.
+- 2021-01-16: testbench: fix invalid sequence of kafka tests runs
+  kafka tests can not run well in parallel (mostly due to ressource
+  constraints on CI machines). Accidentally, this was not enforced for
+  one of the tests. That could lead to random failures and false positives.
+- 2021-01-14: testbench: fix kafkacat issues
+  The kafkacat tool has an upper limit of how many messages it can send
+  at once. Going over that limit causes messages loss. The exact limit
+  seems to depend on the environment. This causes testbench false positives.
+  This commit fixes two related issues:
+  - errors during kafkacat run were not detected - this has been added
+  - we now have a "max messages at once" setting, after which kafkacat
+    is restarted for the next batch of messages. It currently is set
+    to 25,000 msgs per incarnation. All tests loop now to send the
+    required number of messages. This has been fixed at the testbench
+    framework level, so no need to adjust individual tests.
+- 2021-01-14: testbench: fix year-dependendt clickhouse test
+  A test had the year value hardcoded and as such failed whenever the
+  year changed. This patch corrects that.
+----------------------------------------------------------------------------------------
+Scheduled Release 8.2012.0 (aka 2020.12) 2020-12-08
+- 2020-12-07:  testbench bugfix: some tests did not work in make distcheck
+  - certificate file missing in dist tarball
+  - some test cases did not properly specify path to cert file
+  Thanks to Michael Biebl for alerting us and providing part of
+  the fix.
+  closes https://github.com/rsyslog/rsyslog/issues/4446
+- 2020-12-07: immark: rewrite with many improvements
+  - mark message text can now be specified
+  - support for rulesets
+  - support for using syslog API vs. regular internal interface
+  - support for output template system
+  - ability to specify is mark message flag can be set
+  - minor changes and improvements
+- 2020-11-30: usability: re-phrase error message to help users better understand cause
+  see also https://github.com/rsyslog/rsyslog/issues/3910
+- 2020-11-10: add new system property $now-unixtimestamp
+  Among others, this may be used as a monotonic counter
+  for doing load-balancing and other things.
+  Thanks to Nicholas Brown for suggesting this feature.
+- 2020-11-04: omfwd: add new rate limit option
+  Adding new rate limit option to omfwd for rate limiting
+  syslog messages sent to the remote server
+  ratelimit.interval:
+      Specifies the rate-limiting interval in seconds.
+      Default value is 0, which turns off rate limiting.
+  ratelimit.burst
+          Specifies the rate-limiting burst in number of messages.
+  closes https://github.com/rsyslog/rsyslog/issues/4423
+  Thanks to Dinesh-Ramakrishnan for the patch.
+- 2020-11-03: omfwd bug: param "StreamDriver.PermitExpiredCerts" is not "off" by default
+  The default behaviour of expired certificates of stream driver in TLS mode, should
+  have been that the see tcp transmission is closed due to expired certificates, and
+  error messages emited in rsyslog status. This was not the case. That in turn could
+  lead to permitting sessions which should not be permitted.
+  Thanks to Vincent Zhu for alerting us and providing a great problem analysis
+  closes: https://github.com/rsyslog/rsyslog/issues/4425
+----------------------------------------------------------------------------------------
+Scheduled Release 8.2010.0 (aka 2020.10) 2020-10-20
+- 2020-10-13: gnutls TLS subsystem bugfix: handshake error handling
+  If the tls handshake does not immediatelly finish, gnutls_handShake is called in
+  doRetry handler again. However the error handling was not
+  complete in the doRetry handler. A failed gnutls_handShake call
+  did not abort the connection and properly caused unexpected
+  problems like in issues:
+  https://github.com/rsyslog/rsyslog/issues/4270
+  https://github.com/rsyslog/rsyslog/issues/4288
+- 2020-10-13: core/msg bugfix: memory leak
+  There is a missing call to json_object_put(json) if the call to
+  jsonPathFindParent() failed. It's leaking memory. Depending on workload and config,
+  this leak can potentially grow large (albeit we did not see reports from practice).
+  Thanks to Julien Thomas for the patch.
+- 2020-10-13: core/msg bugfix: segfault in jsonPathFindNext() when <root> not an object
+  The segfault gets happens when <bCreate> is 1 and when the <root>
+  container where to insert the <namebuf> key is not an object.
+  Here is simple reproducible test case:
+  // ensure we start fresh
+  // unnecessary if there was no previous set
+  unset $!;
+  set $! = "";
+  set $!event!created = 123;
+  Thanks to Julien Thomas for the patch.
+- 2020-10-13: openssl TLS subsystem: improvments of error and status messages
+  Adding error logs at the ssl handshake failure scenarios.
+  Adding the header "nsd_ossl:" tag to these logs to identify
+  the origin module from which logs are generated.
+  Thanks to Anusha Pai G for the patch.
+- 2020-10-06: add 'exists()' script function to check if variable exists
+  This implements a way to check if rsyslog variables (e.g. '$!path!var') is
+  currently set of not.
+  Sample: if exists($!somevar) then ...
+  closes https://github.com/rsyslog/rsyslog/issues/4385
+- 2020-10-03: core bugfix: do not create empty JSON objects on non-existent key access
+  Performing a condition (eg: check for an empty string) on a subtree key that do not
+  exists (depth > 1 from the root container), creates an empty "parent" object.
+  Depending on your context, you may end up with (kind of...) annoying garbage when
+  producing object documents (for instance to index in ES).
+  Also fixes a hypothetical hang condition with an almost (?) unused plugin parameter
+  passing mode, for details see
+  https://github.com/rsyslog/rsyslog/issues/4436
+  closes https://github.com/rsyslog/rsyslog/issues/4430
+  Thanks to Julien Thomas for the patch.
+- 2020-09-28: gnutls subsysem bugfix: potential hang on session closure
+  Some TLS servers don't reply to graceful shutdown requests "for
+  optimization". This results in rsyslog's omfwd+gtls client to wait
+  forever for a reply of the TLS server which never comes, due to shutting
+  down the connection with gnutls_bye(GNUTLS_SHUT_RDWR).
+  On systemd systems, commands such as "systemctl restart rsyslog" just
+  hang for 1m30 and rsyslogd gets killed upon timeout by systemd.
+  This is fixed by replacing the call to gnutls_bye(GNUTLS_SHUT_RDWR) by calls to
+  gnutls_bye(GNUTLS_SHUT_WR) which is sufficient and doesn't wait for a
+  server reply.
+  As an example, Kiwi Syslog server is known to cause this issue.
+  Thanks to Renaud Métrich for the patch.
+- 2020-09-23: core/network bugfix: obey net.enableDNS=off when querying local hostname
+  Local hostname resolution used DNS queries even if the enableDNS was set to off, and
+  this could cause unexpected delays in the HUP signal handling if the DNS server was
+  not responsive.
+  Thanks to Samu Nuutamo for the fix.
+- 2020-09-14: core bugfix: potential segfault on query of PROGRAMNAME property
+  A data race can happen on variable iLenProgram as it is not guarded
+  by the message mutex at time of query. This can lead to it being
+  non -1 while the buffer has not yet properly set up.
+  Thanks to Leo Fang for alerting us and a related
+  patch proposal.
+  replaces https://github.com/rsyslog/rsyslog/pull/4300
+- 2020-09-14: imtcp bugfix: broken connection not necessariy detected
+  Due to an invalid return code check, broken TCP sessions could not
+  necessarily be detected "right in time". This can result is the loss
+  of one message.
+  closes https://github.com/rsyslog/rsyslog/issues/4227
+  Thanks to Leo Fang for the patch.
+- 2020-09-14: new module: imhttp - http input
+  permits to receive log data via HTTP.
+  uses http library to provide http input.
+  user would need to configure an 'endpoint' as input, along
+  with a ruleset, defining how the input should be routed in
+  rsyslog.
+  Thanks to Nelson Yen for contributing this module.
+- 2020-09-11: mmdarwin bugfix: potential zero uuid when reusing existing one
+  - fix a use-after-free variable during darwin uuid message extraction
+  - improve debug/output by logging uuid parse errors
+  Thanks to github user frikilax for the patch.
+- 2020-09-10: imdocker bugfix: build issue on some platforms
+  An invalid variable type was used, leading to compile errors at least on
+  all platform that use gcc 10 and above. Otherwise, however, it looks like the
+  issue caused no real harm.
+- 2020-09-07: omudpspoof bugfix: make compatbile with Solaris build
+  Thanks to Dagobert Michelsen for the patch.
+- 2020-09-03: testbench fix: python 3 incompatibility
+- 2020-09-02: core bugfix: segfault if disk-queue file cannot be created
+  When using Disk Queue and a queue.filename that can not be created
+  by rsyslog, the service does not switch to another queue type as
+  supposed to and crashes at a later step.
+  closes: https://github.com/rsyslog/rsyslog/issues/4282
+- 2020-08-26: cosmetic: fix dummy module name in debug output
+  When we have optional components (like imjournal) a dummy module
+  is used. It's sole purpose is to emit "this module is not available".
+  During init, the module emitted an invalid module name into the debug
+  log. This has now been replaced by the generic term "dummy".
+  Note: it is highly unlikely that someone will ever see that message
+  at all, as it is unlikely for the dummy modules to be build.
+  see also: https://github.com/rsyslog/rsyslog/commit/84a7e3d80b80106dcc86c273ed8cf78a6c11c722#r41782830
+  Thanks to Thomas D. (whissi) for the patch.
+- 2020-08-26: config bugfix: intended warning emitted as error
+  When there are actions configured after a STOP, a warning should be
+  emitted. In fact, an error message is generated. This prevents the
+  construct, which may have some legit uses in exotic settings. It
+  may also break older configs, but as the message is an error
+  for so long now, this should be no longer of concern.
+----------------------------------------------------------------------------------------
+Scheduled Release 8.2008.0 (aka 2020.08) 2020-08-25
+- 2020-08-25: imdocker bugfix: error reporting not always correct
+  A wrong function to obtain the error code was used. This
+  could lead to invalid error messages.
+  Thanks to Steve Grubb for the bug report and fix proposal.
+  closes https://github.com/rsyslog/rsyslog/issues/4381
+- 2020-08-25: imptcp: add max sessions config parameter
+  The max is per-instance, not global across all instances.
+  There is also a bugfix where if epoll failed I think we could leave a
+  session linked in the list of sessions, this code unlinks it.
+  Thank to Alfred Perlstein for the patch.
+- 2020-08-24: omelasticsearch bugfix: reply buffer reset after health check
+  The issue happens when more than one server is defined on the
+  action. On that condition a health check is made through
+  checkConn() before sending the POST. The replyLen should be
+  set back to 0 after the health check, otherwise the response
+  data received from the POST gets appended to the end of the
+  last health check.
+  Thanks to Julien Thomas for the patch.
+- 2020-08-14: omfile: do no longer limit dynafile cache size in legacy format
+  When using obsolete legacy config format, omfile had a hard limit of
+  1,000 dynafile cache entries. This does not play well with very
+  large installation. This limit is now removed and converted into
+  a warning if cache size > 25,000 is specified.
+  Note: the problem can easily be worked-around by using modern
+  config format (RainerScript).
+  closes: https://github.com/rsyslog/rsyslog/issues/4241
+- 2020-08-13: imudp: fix very small, static memory leak
+  When ruleset support was used, the ruleset name was not freed upon rsyslog
+  termination. While this has no consequences for regular runs, it generates
+  leak errors under memory debuggers and as such makes debugging harder than
+  necessary.
+  Thanks to github user frikilax for the patch.
+- 2020-08-13: omelasticsearch: add parameter skipPipelineIfEmpty
+  When POST'ing a document, Elasticsearch does not allow an empty pipeline
+  parameter value. This patch introduces boolean option skipPipelineIfEmpty
+  to the omelasticsearch action. When set to true, the pipeline parameter
+  won't be posted. Default is false so we do not modify current behavior.
+  Thanks to Julien Thomas for the patch.
+- 2020-08-12: systemd service file removed from project
+  This was done as distros nowadays have very different service files and it no
+  longer is useful to provide a "generic" (sic) example.
+  see also: https://github.com/rsyslog/rsyslog/issues/4333
+- 2020-08-11: gnutls TLS driver bugfix: EKU check not done properly
+  When the server accepted a new connection, it did not properly set the
+  dataTypeCheck field based on the listening socket. That resulted in
+  skipping ExtendedKeyUsage (EKU) check on the client.
+  Thanks to Daiki Ueno for the patch.
+- 2020-08-06: MMDARWIN:: improve configuration flexibility and UUID fix
+  -t pu now able to get fields from local variables ($.)
+  - now able to configure a custom root container for mmdarwin fields
+  - now able to put nested keys ($!key1!key2)
+  - don't regenerate a UUID each time, but instead check if one exists before
+    creating it (allow successive calls without losing previous UUID)
+  Thanks to github user frikilax for the contribution.
+- 2020-08-06: add --enable-imjournal=optional ./configure option
+- 2020-08-06: IMPCAP::Fixes: segfault, memory and build corrections
+  * fix bug in ethernet packets parsing
+  * fix removes build error with gcc10: 'multiple definition of...'
+  * resolve memory leak during interface init failure (device not freed after post-create error)
+  * add test 'impcap_bug_ether' to prove ethernet parser fix is working
+  Thanks to github user frikilax for the contribution.
+  closes https://github.com/rsyslog/rsyslog/issues/4332
+- 2020-07-14: CI: add support for github actions
+- 2020-07-14: imklog: add ruleset support
+  see also: https://github.com/rsyslog/rsyslog/issues/4344#issuecomment-658001854
+  see also: https://github.com/rsyslog/rsyslog/issues/106
+- 2020-07-06: config system fix: ChkDisabled method to make config.enabled work
+  There was wrong negation in the method so it returned 0/1 in reverse
+  and also it did not mark the node to not be reported as unknown at all
+  times which is needed after all.
+  Thanks to Jiri Vymazal for the patch.
+----------------------------------------------------------------------------------------
+Scheduled Release 8.2006.0 (aka 2020.06) 2020-06-23
+- 2020-06-22: queue: permit ability to double size at shutdown
+  This prevents message loss due to "queue full" when re-enqueueing data
+  under quite exotic settings.
+  see also https://github.com/rsyslog/rsyslog/issues/3941#issuecomment-549765813
+  closes https://github.com/rsyslog/rsyslog/issues/4020
+- 2020-06-22:Fixing imfile segfaulting on selinux denial
+  If imfile is denied access to file watched trough symlink there is
+  unchecked condition resulting in access to not initialized memory.
+- 2020-06-22: openssl: Fixed memory leak when tls handshake failed.
+  closes: https://github.com/rsyslog/rsyslog/issues/4319
+- 2020-06-22: change systemd service file to wait for network
+  now that rsyslog is usually only installed for real syslog servers,
+  we should assume that some network listening or forwarding happens
+  on start. As such we need to start a bit later, after the network.
+  This poses no problem as systemd nowadays comes with journal which
+  is in almost all cases configured to buffer log data while
+  rsyslog is not yet running.
+  see also https://github.com/rsyslog/rsyslog-pkg-rhel-centos/issues/72
+- 2020-06-22: NEW INPUT MODULE:: impcap, network packets input parser
+  Thanks to github user frikilax for the contribution.
+- 2020-06-22: ksi bugfix: Optimized code in KSI module initialization fixed.
+  KSI module initialization will not stuck in infinite loop when code is
+  built with optimization -O2.
+- 2020-06-05: operatingstatefile bugfix: month was given too low
+  The month was printed with the range 0 (January) to 11 (December).
+  This has now been corrected.
+  closes https://github.com/rsyslog/rsyslog/issues/4292
+- 2020-06-05: build system: add "optional" build functionality to some components
+  Nameley:
+    --enable-libdbi=optional
+    --enable-mmdblookup=optional
+    --enable-imkafka=optional
+    --enable-omkafka=optional
+  If used, builds a dummy module which just emits a "module not supported
+  on this platform" error message when loaded.
+  Primary use case for this system is Debian-ish builds on SUSE OBS,
+  where we prefer to have a single package definition for all versions
+  (else things get much more complicated).
+- 2020-05-23: config system bugfix: backticks cat segfault if file cannot be opened
+  when a `cat <filename>` construct is used in rsyslog.conf and <filename> can not
+  be accessed (does not exist, no permissions, ...), rsyslog segfaults.
+  Thanks to Michael Skeffington for notifying us and providing root cause analysis.
+  closes https://github.com/rsyslog/rsyslog/issues/4290
+- 2020-05-15: imtcp bugfix: octet framing/stuffing problem with discardTruncatedMsg on
+  When "discardTruncatedMsg" was enabled in imtcp, messages were incorrectly
+  skipped if the last character before the truncation was the LFdelimiter.
+  Also adds two testbench tests for this case.
+  closes: https://github.com/rsyslog/rsyslog/issues/4281
+- 2020-05-12: ompipe bugfix: race during HUP
+  When HUP was received, the write mutex was not aquired. This could
+  lead to unexpected invalidation of the output file descriptor.
+  Thanks to Julien Thomas for alerting us on this issue.
+  see also https://github.com/rsyslog/rsyslog/pull/4136#issuecomment-578326278
+- 2020-05-12: ompipe: add action parameter tryResumeReopen
+  Sometimes we need to reopen a pipe after an ompipe action gets
+  suspended. Sending an HUP signal to rsyslog does the job but requires
+  an interraction with rsyslog. The patch adds support for a new boolean
+  option, tryResumeReopen, for the ompipe action. It mimics what an HUP
+  signal would do.
+  Thanks to Julien Thomas for the patch.
+- 2020-05-12: imjournal: remove strcat call
+  Thanks to Jeff Marckel for the patch.
+- 2020-05-12: build system: libzcmq version requirement needs to be bumped
+  Thanks to Thomas Deutschmann for pointing this out.
+  closes https://github.com/rsyslog/rsyslog/issues/3957
+- 2020-05-12: testbench: download ElasticSearch binaries from rsyslog.com
+  The official ElasticSearch download site sometimes denies the download.
+- 2020-05-11: openssl netstream driver bugfix: context leak
+  The context object was not properly freed.
+  Thanks to Michael Zimmermann for the fix.
+- 2020-05-11: omhttp: Add support for multiple http headers
+  Allows the inclusion of multiple http headers on the REST call.
+  Thanks to callmegar for the patch.
+- 2020-04-29: core bugfix: group id could not be obtained for very large groups
+  Thanks to github user emilbart for the patch.
+- 2020-04-29: testbench additions (relp broken connection test)
+- 2020-04-29: omudpspoof bugfix: issues with oversized messages
+  First issue was an incorrect packet length in UDP Header. It has to be the FULL UDP Packet
+  regardless of the MTU Setting. As a result regardless of IP fragmentation, the MTU setting
+  also limited the siizmax size of the UDP message.
+  The second issue was incorrect calculation of the UDP Checksum with libnet if
+  IP fragmentation was used (Based on MTU Setting). As a result, the network packets were
+  dropped by the tcp stack before they even could reach there target. The workarround for this
+  problem is, that we set the UDP Checksum to 0x0000 which allows skipping of the checksum
+  test. Fixing the problem by calculating the correct UDP Checksum would require some
+  code changes in the libnet.
+  Also fixed the omudpspoof bigmsg test and increased the testing size to 16KB.
+- 2020-04-29: omprog: fix assert failed on HUP with output flag
+  If the 'output' setting of omprog was used and rsyslog received a HUP
+  signal just after starting (and before the omprog action received the
+  first log to process), an internal assertion could fail, causing
+  rsyslog to terminate. The failure message was "rsyslogd: omprog.c:660:
+  closeOutputFile: Assertion `pCtx->bIsRunning' failed."
+  The failure could also occur if rsyslog received a HUP signal during
+  the shutdown sequence.
+  This bug was introduced in v8.2004 by PR https://github.com/rsyslog/rsyslog/pull/4255
+  Although a test already existed that checked the interaction of HUPs
+  with the 'output' setting, it didn't always fail in this particular case
+  due to timing conditions. The test has been improved to cover this case
+  more reliably.
+  Thanks to Joan Sala Isern for the patch.
+----------------------------------------------------------------------------------------
+Scheduled Release 8.2004.0 (aka 2020.04) 2020-04-28
+- 2020-04-28: ksi bugfix: When KSI module is suddenly closed, files are finalized
+  In async. mode all pending signature requests are closed immediately and
+  unsigned block marker is attached with message about sudden closure.
+  Similar approach is used for blocks that already contain some records.
+  Empty blocks are just closed without any metadata.
+  Thanks to Taavi Väljaots for the patch.
+- 2020-04-28: ksi bugfix: Signer thread initialization is verified before usage.
+  When signer thread is created in rsksiInitModule thread successful
+  initialization is verified before returning the function. This will
+  prevent adding records to not initialized module and in case of an
+  error signature files opened will contain only magic bytes.
+  Thread flags replaced with thread state.
+  When init module fails, module is disabled.
+  Thanks to Taavi Väljaots for the patch.
+- 2020-04-28: ksi bugfix: Hardcoded default hash algorithm replaced with 'default'
+  Instead of hardcoded SHA-256 KSI_getHashAlgorithmByName("default")
+  is used to get default hash function.
+  Function rsksiSetHashFunction and SetCnfParam updated.
+  Thanks to Taavi Väljaots for the patch.
+- 2020-04-28: imfile bugfix: poential segfault in stream object on file read
+  - if cstrLen(pThis->prevMsgSegment) > maxMsgSize then len calculation
+    become negative if cstrLen(thisLine) < cstrLen(pThis->prevMsgSegment)
+    This causes illegal access to memory location and thus causing segfault.
+  - assigning len = 0 if cstrLen(pThis->prevMsgSegment) > maxMsgSize so that
+    it access the correct memory location.
+  Thanks to github user jaankit
+- 2020-04-28: openssl TLS drivers: made more reliable for older openssl versions
+  OpenSSL can retry some failed operations, but older versions need an explicit
+  opt-in to do so. This is now done.
+- 2020-04-28: omprog: fix bad fd errors in daemon mode
+  When omprog was used with the 'forceSingleInstance=on' option, and/or
+  the 'output' setting, "bad file descriptor" errors occurred, which
+  prevented the external program to be executed and/or the program output
+  to be correctly captured. The bug could also manifest as "resource
+  temporarily unavailable" errors, or other errors related to the use of
+  invalid/reassigned file descriptors. These errors only happened when
+  rsyslog ran in daemon mode (i.e. they didn't happen if rsyslogd was
+  run with the '-n' option).
+  The cause of the bug was that omprog opened the pipe fds needed by
+  these flags during the configuration load phase (in the 'newActInst'
+  module entrypoint). This is a bad place since the fork of the daemon
+  occurs after this phase, and all fds are closed when the daemon process
+  is started (see 'initAll' in rsyslogd.c), hence invalidating the
+  previously opened fds.
+  To correct this, the single child process and the output capture thread
+  are now started later, when the first log message is received by the
+  first worker thread. (Note: the 'activateCnf' module entrypoint, despite
+  being invoked after the fork, cannot be used for this purpose, since it
+  is invoked per module, not per action instance.)
+  Currently no automated test exists for this use case since the testbench
+  always runs rsyslog in non-daemon mode.
+  Affected versions: v8.38 and later
+  closes: https://github.com/rsyslog/rsyslog/issues/4247
+  Thanks to Joan Sala Isern for the patch.
+- 2020-04-28: omfile bugfix: $outchannel split log lines at rotation time
+- 2020-04-17: openssl: add support for libreSSL
+  Disable use of "@SECLEVEL" in default cipher string and
+  avoid SSL_CONF_CTX_set_flags() API when LIBRESSL is used.
+  This means tlscommands will not work.
+  closes: https://github.com/rsyslog/rsyslog/issues/4210
+- 2020-03-04: imudp bugfix: build problems on some Linux kernel versions
+  Thanks to Wen Yang for the patch.
+- 2020-03-02: conf output bugfix: -o produces missing space between call and rulename
+  Thanks to Tetiana Ohnieva for the patch.
+  closes https://github.com/rsyslog/rsyslog/issues/3761
+----------------------------------------------------------------------------------------
 Scheduled Release 8.2002.0 (aka 2020.02) 2020-02-25
+- 2020-02-25: imfile: add per minute rate limiting
+  Add MaxBytesPerMinute and MaxLinesPerMinute options.
+  These take integer values and, respectively, limit the number
+  of bytes or lines that may be sent in a minute.
+  This can be used to put a limit on the count or volume of logs
+  that may be sent for an imfile.
+  Thanks to Greg Farrell for the patch.
+- 2020-02-24: core: add global parameter "security.abortOnIDResolutionFail"
+  This parameter controls whether or not rsyslog aborts when a name ID
+  lookup fails (for user and group names). This is necessary as a security
+  measure, as otherwise the wrong permissions can be assigned or privileges
+  are not dropped.
+  CHANGE OF BEHAVIOR
+  The default for this parameter is "on". In previous versions, the default
+  was "off" (by virtue of this parameter not existing). As such, existing
+  configurations may now error out.
+  We have decided to accept this change of behavior because of the potential
+  security implications.
+  closes https://github.com/rsyslog/rsyslog/issues/4164
+- 2020-02-24: openssl TLS driver bugfix: chained certificates were not accepted
+  This was supported since always inside GnuTLS driver, but was missing for openssl one.
+- 2020-02-24: core bugfix: too early parsing of incoming messages
+  In theory, rsyslog should call parsers on the queue worker threads whenever
+  possible. This enables the parsers to be executed in parallel. There are
+  some cases where parsers needs to be called earlier, namely when parsed
+  data is needed for rate-limiting.
+  The logic to do this previously did not work correctly and was fixed six
+  years ago (!) by b51dd22. Unfortunately, b51dd22 was overly agressive:
+  it actually makes the early parser call now mandatory, effectively moving
+  parsing to the input side where there is no to little concurrency.
+  We still do not need to call the parser when all messages, regardless of
+  severity, need to be rate-limited. This is the default and very frequent
+  case. This patch introduces support for this and as such makes parsers
+  able to run in parallel in the frequent case again.
+  closes https://github.com/rsyslog/rsyslog/issues/4187
+- 2020-02-20: testbench bugfix: two minor issues in omkafkadynakey.sh test
+  lead to false positives during test runs (depending on circumstances)
+  closes: https://github.com/rsyslog/rsyslog/issues/4134
+- 2020-02-20: testbench: set max extra data length for tcpflood from 200 to 512KiB
+  Added a imrelp test for big messages (256KB).
+  closes: https://github.com/rsyslog/rsyslog/issues/4158
+- 2020-02-20: config system bugfix: 'config.enabled' directive oddities
+  Previously the directive was processed way too late which caused false
+  errors whenever it was set to 'off' and possibly other problems.
+  Thanks to Jiri Vymazal for the patch.
+- 2020-02-09: imfile bugfix: timeout did not work on very busy system
+  The timeout feature was soley based on timeouts of the poll()
+  system call. On a very busy system, this would probably happen
+  very seldomly.  Moreover, the timeout could occur later than
+  expected on any system with high load.
+  The issue was not reported from practice but discovered during
+  CI system improvements.
+- 2020-01-30: build system: change --enable-imfile-tests default to "yes"
+  This was accidentally set to "no" some time ago (actual commit unknown). Tests for
+  imfile should by default run when imfile is enabled.
+  see also https://github.com/rsyslog/rsyslog/issues/4120
 - 2020-01-27: build system: add option --enable-gnutls-tests
   This enables us to build GNUtls support but not necessarily
   test it in CI. This is useful for some specialised subcomponent

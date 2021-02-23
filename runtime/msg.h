@@ -79,13 +79,13 @@ struct msg {
 	uchar	*pszRawMsg;	/* message as it was received on the wire. This is important in case we
 				 * need to preserve cryptographic verifiers.  */
 	uchar	*pszHOSTNAME;	/* HOSTNAME from syslog message */
-	char *pszRcvdAt3164;	/* time as RFC3164 formatted string (always 15 charcters) */
-	char *pszRcvdAt3339;	/* time as RFC3164 formatted string (32 charcters at most) */
-	char *pszRcvdAt_MySQL;	/* rcvdAt as MySQL formatted string (always 14 charcters) */
+	char *pszRcvdAt3164;	/* time as RFC3164 formatted string (always 15 characters) */
+	char *pszRcvdAt3339;	/* time as RFC3164 formatted string (32 characters at most) */
+	char *pszRcvdAt_MySQL;	/* rcvdAt as MySQL formatted string (always 14 characters) */
 	char *pszRcvdAt_PgSQL;  /* rcvdAt as PgSQL formatted string (always 21 characters) */
-	char *pszTIMESTAMP3164;	/* TIMESTAMP as RFC3164 formatted string (always 15 charcters) */
-	char *pszTIMESTAMP3339;	/* TIMESTAMP as RFC3339 formatted string (32 charcters at most) */
-	char *pszTIMESTAMP_MySQL;/* TIMESTAMP as MySQL formatted string (always 14 charcters) */
+	char *pszTIMESTAMP3164;	/* TIMESTAMP as RFC3164 formatted string (always 15 characters) */
+	char *pszTIMESTAMP3339;	/* TIMESTAMP as RFC3339 formatted string (32 characters at most) */
+	char *pszTIMESTAMP_MySQL;/* TIMESTAMP as MySQL formatted string (always 14 characters) */
 	char *pszTIMESTAMP_PgSQL;/* TIMESTAMP as PgSQL formatted string (always 21 characters) */
 	uchar *pszStrucData;    /* STRUCTURED-DATA */
 	uint16_t lenStrucData;	/* (cached) length of STRUCTURED-DATA */
@@ -229,8 +229,9 @@ void getInputName(const smsg_t * const pM, uchar **ppsz, int *const plen);
 int getHOSTNAMELen(smsg_t *pM);
 uchar *getProgramName(smsg_t *pM, sbool bLockMutex);
 uchar *getRcvFrom(smsg_t *pM);
-rsRetVal propNameToID(uchar *pName, propid_t *pPropID);
+rsRetVal propNameToID(const uchar *pName, propid_t *pPropID);
 uchar *propIDToName(propid_t propID);
+rsRetVal ATTR_NONNULL() msgCheckVarExists(smsg_t *const pMsg, msgPropDescr_t *pProp);
 rsRetVal msgGetJSONPropJSON(smsg_t *pMsg, msgPropDescr_t *pProp, struct json_object **pjson);
 rsRetVal msgGetJSONPropJSONorString(smsg_t * const pMsg, msgPropDescr_t *pProp, struct json_object **pjson,
 uchar **pcstr);
@@ -238,7 +239,7 @@ rsRetVal getJSONPropVal(smsg_t *pMsg, msgPropDescr_t *pProp, uchar **pRes, rs_si
 unsigned short *pbMustBeFreed);
 rsRetVal msgSetJSONFromVar(smsg_t *pMsg, uchar *varname, struct svar *var, int force_reset);
 rsRetVal msgDelJSON(smsg_t *pMsg, uchar *varname);
-rsRetVal jsonFind(struct json_object *jroot, msgPropDescr_t *pProp, struct json_object **jsonres);
+rsRetVal jsonFind(smsg_t *const pMsg, msgPropDescr_t *pProp, struct json_object **jsonres);
 
 rsRetVal msgPropDescrFill(msgPropDescr_t *pProp, uchar *name, int nameLen);
 void msgPropDescrDestruct(msgPropDescr_t *pProp);
