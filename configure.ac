@@ -2339,6 +2339,17 @@ if test "x$enable_omhiredis" = "xyes" -o "x$enable_imhiredis" = "xyes" ; then
         )]
     )
 fi
+
+if test "x$enable_imhiredis" = "xyes" ; then
+    PKG_CHECK_MODULES(LIBEVENT, [libevent >= 2.0, libevent_pthreads],
+        # libevent found
+        [
+            HIREDIS_LIBS="$HIREDIS_LIBS -levent -levent_pthreads"
+        ],
+        # libevent not found
+        [AC_MSG_ERROR([no libevent >= 2.0 found with pthreads support, imhiredis cannot use pub/sub])])
+fi
+
 AM_CONDITIONAL(ENABLE_OMHIREDIS, test x$enable_omhiredis = xyes)
 AM_CONDITIONAL(ENABLE_IMHIREDIS, test x$enable_imhiredis = xyes)
 
