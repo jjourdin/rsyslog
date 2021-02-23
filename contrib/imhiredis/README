@@ -20,7 +20,13 @@ Following parameters are optional:
  - password: If set, the plugin will issue an "AUTH" command before calling xPOP
  - uselpop: If set to "1", LPOP will be used instead of default RPOP
 
-Redis pipelining is used inside the workerthread, with a hardcoded batch size of #1000
+Redis pipelining is used inside the workerthread, with a hardcoded batch size of #10.
+
+Imhiredis will query Redis every second to see if entries are in the list, if that's the case they will be dequeued
+continuously by batches of 10 until none remains.
+
+Due to its balance between polling interval and pipelining and its use of lists, this mode is quite performant and reliable.
+However, due to the 1 second polling frequency, one may consider using the `subscribe` mode instead if very low latency is required.
 
 ```
 module(load="imhiredis")
@@ -68,7 +74,7 @@ input(
 
 
 TODO
-* Plugin has a "#define QUEUE_BATCH_SIZE 1000" for queue mode, should be configurable
 * TLS support
+* detect master/replicas relationships and follow them
 
 
