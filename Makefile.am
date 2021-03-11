@@ -337,6 +337,11 @@ if ENABLE_PMDB2DIAG
 SUBDIRS += contrib/pmdb2diag
 endif
 
+# imhiredis
+if ENABLE_IMHIREDIS
+SUBDIRS += contrib/imhiredis
+endif
+
 # tests are added as last element, because tests may need different
 # modules that need to be generated first
 SUBDIRS += tests
@@ -588,6 +593,10 @@ if ENABLE_DISTCHECK_WORKAROUND
 DISTCHECK_CONFIGURE_FLAGS+= --disable-testbench
 else
 DISTCHECK_CONFIGURE_FLAGS+= --enable-testbench
+endif
+
+if ENABLE_IMHIREDIS
+DISTCHECK_CONFIGURE_FLAGS+= --enable-imhiredis
 endif
 
 dist-hook:
