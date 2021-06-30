@@ -1,6 +1,6 @@
 /* Definitions for tcpsrv class.
  *
- * Copyright 2008-2015 Adiscon GmbH.
+ * Copyright 2008-2021 Adiscon GmbH.
  *
  * This file is part of rsyslog.
  *
@@ -23,6 +23,7 @@
 
 #include "obj.h"
 #include "prop.h"
+#include "net.h"
 #include "tcps_sess.h"
 #include "statsobj.h"
 
@@ -34,19 +35,27 @@ typedef enum ETCPsyslogFramingAnomaly {
 } eTCPsyslogFramingAnomaly;
 
 
+/* config parameters for TCP listeners */
+struct tcpLstnParams_s {
+	const uchar *pszPort;			/**< the ports the listener shall listen on */
+	const uchar *pszAddr;                 /**< the addrs the listener shall listen on */
+	sbool bSuppOctetFram;	/**< do we support octect-counted framing? (if no->legay only!)*/
+	sbool bSPFramingFix;	/**< support work-around for broken Cisco ASA framing? */
+	sbool bPreserveCase;			/**< preserve case in fromhost */
+	const uchar *pszLstnPortFileName;	/**< File in which the dynamic port is written */
+	uchar *pszStrmDrvrName;			/**< stream driver to use */
+	uchar *pszInputName;			/**< value to be used as input name */
+	prop_t *pInputName;
+	ruleset_t *pRuleset;			/**< associated ruleset */
+	uchar dfltTZ[8];			/**< default TZ if none in timestamp; '\0' =No Default */
+};
+
 /* list of tcp listen ports */
 struct tcpLstnPortList_s {
-	uchar *pszPort;			/**< the ports the listener shall listen on */
-	uchar *pszAddr;                 /**< the addrs the listener shall listen on */
-	prop_t *pInputName;
+	tcpLstnParams_t *cnf_params;	/**< listener config parameters */
 	tcpsrv_t *pSrv;			/**< pointer to higher-level server instance */
-	ruleset_t *pRuleset;		/**< associated ruleset */
 	statsobj_t *stats;		/**< associated stats object */
-	sbool bSuppOctetFram;	/**< do we support octect-counted framing? (if no->legay only!)*/
 	ratelimit_t *ratelimiter;
-	uchar dfltTZ[8];		/**< default TZ if none in timestamp; '\0' =No Default */
-	sbool bSPFramingFix;	/**< support work-around for broken Cisco ASA framing? */
-	const uchar *pszLstnPortFileName;	/**< File in which the dynamic port is written */
 	STATSCOUNTER_DEF(ctrSubmit, mutCtrSubmit)
 	tcpLstnPortList_t *pNext;	/**< next port or NULL */
 };
@@ -70,7 +79,7 @@ struct tcpsrv_s {
 	uchar *pszDrvrAuthMode;	/**< auth mode of the stream driver to use */
 	uchar *pszDrvrPermitExpiredCerts;/**< current driver setting for handlign expired certs */
 	uchar *pszDrvrName;	/**< name of stream driver to use */
-	uchar *pszInputName;	/**< value to be used as input name */
+	uchar *pszInputName;	/**< value to be used as input name */ // TODO: REMOVE ME!!!!
 	uchar *pszOrigin;		/**< module to be used as "origin" (e.g. for pstats) */
 	ruleset_t *pRuleset;	/**< ruleset to bind to */
 	permittedPeers_t *pPermPeers;/**< driver's permitted peers */
@@ -130,14 +139,13 @@ BEGINinterface(tcpsrv) /* name must also be changed in ENDinterface macro! */
 	rsRetVal (*Construct)(tcpsrv_t **ppThis);
 	rsRetVal (*ConstructFinalize)(tcpsrv_t __attribute__((unused)) *pThis);
 	rsRetVal (*Destruct)(tcpsrv_t **ppThis);
-	rsRetVal (*ATTR_NONNULL(1,2) configureTCPListen)(tcpsrv_t*,
-		const uchar *pszPort, int bSuppOctetFram, const uchar *pszAddr, const uchar *);
+	rsRetVal (*ATTR_NONNULL(1,2) configureTCPListen)(tcpsrv_t*, tcpLstnParams_t *const cnf_params);
 	rsRetVal (*create_tcp_socket)(tcpsrv_t *pThis);
 	rsRetVal (*Run)(tcpsrv_t *pThis);
 	/* set methods */
 	rsRetVal (*SetAddtlFrameDelim)(tcpsrv_t*, int);
 	rsRetVal (*SetMaxFrameSize)(tcpsrv_t*, int);
-	rsRetVal (*SetInputName)(tcpsrv_t*, uchar*);
+	rsRetVal (*SetInputName)(tcpsrv_t *const pThis,tcpLstnParams_t *const cnf_params, const uchar *const name);
 	rsRetVal (*SetUsrP)(tcpsrv_t*, void*);
 	rsRetVal (*SetCBIsPermittedHost)(tcpsrv_t*, int (*) (struct sockaddr *addr, char*, void*, void*));
 	rsRetVal (*SetCBOpenLstnSocks)(tcpsrv_t *, rsRetVal (*)(tcpsrv_t*));
@@ -188,15 +196,13 @@ BEGINinterface(tcpsrv) /* name must also be changed in ENDinterface macro! */
 	rsRetVal (*SetGnutlsPriorityString)(tcpsrv_t*, uchar*);
 	/* added v21 -- Preserve case in fromhost, 2018-08-16 */
 	rsRetVal (*SetPreserveCase)(tcpsrv_t *pThis, int bPreserveCase);
-	/* added v22 -- File for dynamic Port, 2018-08-29 */
-	rsRetVal (*SetLstnPortFileName)(tcpsrv_t*, uchar*);
 	/* added v23 -- Options for stricter driver behavior, 2019-08-16 */
 	rsRetVal (*SetDrvrCheckExtendedKeyUsage)(tcpsrv_t *pThis, int ChkExtendedKeyUsage);
 	rsRetVal (*SetDrvrPrioritizeSAN)(tcpsrv_t *pThis, int prioritizeSan);
 	/* added v24 -- Options for TLS verify depth driver behavior, 2019-12-20 */
 	rsRetVal (*SetDrvrTlsVerifyDepth)(tcpsrv_t *pThis, int verifyDepth);
 ENDinterface(tcpsrv)
-#define tcpsrvCURR_IF_VERSION 24 /* increment whenever you change the interface structure! */
+#define tcpsrvCURR_IF_VERSION 25 /* increment whenever you change the interface structure! */
 /* change for v4:
  * - SetAddtlFrameDelim() added -- rgerhards, 2008-12-10
  * - SetInputName() added -- rgerhards, 2008-12-10

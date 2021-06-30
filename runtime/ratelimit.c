@@ -2,7 +2,7 @@
  * support for rate-limiting sources, including "last message
  * repeated n times" processing.
  *
- * Copyright 2012-2016 Rainer Gerhards and Adiscon GmbH.
+ * Copyright 2012-2020 Rainer Gerhards and Adiscon GmbH.
  *
  * This file is part of the rsyslog runtime library.
  *
@@ -190,6 +190,31 @@ finalize_it:
 	return ret;
 }
 
+/* ratelimit a message based on message count
+ * - handles only rate-limiting
+ * This function returns RS_RET_OK, if the caller shall process
+ * the message regularly and RS_RET_DISCARD if the caller must
+ * discard the message. The caller should also discard the message
+ * if another return status occurs.
+ */
+rsRetVal
+ratelimitMsgCount(ratelimit_t *__restrict__ const ratelimit,
+	time_t tt,
+	const char* const appname)
+{
+	DEFiRet;
+	if(ratelimit->interval) {
+		if(withinRatelimit(ratelimit, tt, appname) == 0) {
+			ABORT_FINALIZE(RS_RET_DISCARDMSG);
+		}
+	}
+finalize_it:
+	if(Debug) {
+		if(iRet == RS_RET_DISCARDMSG)
+			DBGPRINTF("message discarded by ratelimiting\n");
+	}
+	RETiRet;
+}
 
 /* ratelimit a message, that means:
  * - handle "last message repeated n times" logic
@@ -210,19 +235,24 @@ ratelimitMsg(ratelimit_t *__restrict__ const ratelimit, smsg_t *pMsg, smsg_t **p
 {
 	DEFiRet;
 	rsRetVal localRet;
+	int severity = 0;
 
 	*ppRepMsg = NULL;
 
-	if((pMsg->msgFlags & NEEDS_PARSING) != 0) {
-		if((localRet = parser.ParseMsg(pMsg)) != RS_RET_OK)  {
-			DBGPRINTF("Message discarded, parsing error %d\n", localRet);
-			ABORT_FINALIZE(RS_RET_DISCARDMSG);
+	if(ratelimit->bReduceRepeatMsgs || ratelimit->severity > 0) {
+		/* consider early parsing only if really needed */
+		if((pMsg->msgFlags & NEEDS_PARSING) != 0) {
+			if((localRet = parser.ParseMsg(pMsg)) != RS_RET_OK)  {
+				DBGPRINTF("Message discarded, parsing error %d\n", localRet);
+				ABORT_FINALIZE(RS_RET_DISCARDMSG);
+			}
+			severity = pMsg->iSeverity;
 		}
 	}
 
 	/* Only the messages having severity level at or below the
 	 * treshold (the value is >=) are subject to ratelimiting. */
-	if(ratelimit->interval && (pMsg->iSeverity >= ratelimit->severity)) {
+	if(ratelimit->interval && (severity >= ratelimit->severity)) {
 		char namebuf[512]; /* 256 for FGDN adn 256 for APPNAME should be enough */
 		snprintf(namebuf, sizeof namebuf, "%s:%s", getHOSTNAME(pMsg),
 			getAPPNAME(pMsg, 0));

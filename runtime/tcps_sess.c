@@ -194,8 +194,8 @@ SetLstnInfo(tcps_sess_t *pThis, tcpLstnPortList_t *pLstnInfo)
 	assert(pLstnInfo != NULL);
 	pThis->pLstnInfo = pLstnInfo;
 	/* set cached elements */
-	pThis->bSuppOctetFram = pLstnInfo->bSuppOctetFram;
-	pThis->bSPFramingFix = pLstnInfo->bSPFramingFix;
+	pThis->bSuppOctetFram = pLstnInfo->cnf_params->bSuppOctetFram;
+	pThis->bSPFramingFix = pLstnInfo->cnf_params->bSPFramingFix;
 	RETiRet;
 }
 
@@ -235,6 +235,7 @@ defaultDoSubmitMessage(tcps_sess_t *pThis, struct syslogTime *stTime, time_t ttG
 	DEFiRet;
 
 	ISOBJ_TYPE_assert(pThis, tcps_sess);
+	const tcpLstnParams_t *const cnf_params = pThis->pLstnInfo->cnf_params;
 	
 	if(pThis->iMsg == 0) {
 		DBGPRINTF("discarding zero-sized message\n");
@@ -249,15 +250,15 @@ defaultDoSubmitMessage(tcps_sess_t *pThis, struct syslogTime *stTime, time_t ttG
 	/* we now create our own message object and submit it to the queue */
 	CHKiRet(msgConstructWithTime(&pMsg, stTime, ttGenTime));
 	MsgSetRawMsg(pMsg, (char*)pThis->pMsg, pThis->iMsg);
-	MsgSetInputName(pMsg, pThis->pLstnInfo->pInputName);
-	if(pThis->pLstnInfo->dfltTZ[0] != '\0')
-		MsgSetDfltTZ(pMsg, (char*) pThis->pLstnInfo->dfltTZ);
+	MsgSetInputName(pMsg, cnf_params->pInputName);
+	if(cnf_params->dfltTZ[0] != '\0')
+		MsgSetDfltTZ(pMsg, (char*) cnf_params->dfltTZ);
 	MsgSetFlowControlType(pMsg, pThis->pSrv->bUseFlowControl
 			            ? eFLOWCTL_LIGHT_DELAY : eFLOWCTL_NO_DELAY);
 	pMsg->msgFlags  = NEEDS_PARSING | PARSE_HOSTNAME;
 	MsgSetRcvFrom(pMsg, pThis->fromHost);
 	CHKiRet(MsgSetRcvFromIP(pMsg, pThis->fromHostIP));
-	MsgSetRuleset(pMsg, pThis->pLstnInfo->pRuleset);
+	MsgSetRuleset(pMsg, cnf_params->pRuleset);
 
 	STATSCOUNTER_INC(pThis->pLstnInfo->ctrSubmit, pThis->pLstnInfo->mutCtrSubmit);
 	ratelimitAddMsg(pThis->pLstnInfo->ratelimiter, pMultiSub, pMsg);
@@ -357,6 +358,7 @@ processDataRcvd(tcps_sess_t *pThis,
 	unsigned *const __restrict__ pnMsgs)
 {
 	DEFiRet;
+	const tcpLstnParams_t *const cnf_params = pThis->pLstnInfo->cnf_params;
 	ISOBJ_TYPE_assert(pThis, tcps_sess);
 	int iMaxLine = glbl.GetMaxLine();
 	uchar *propPeerName = NULL;
@@ -395,13 +397,13 @@ processDataRcvd(tcps_sess_t *pThis,
 			if(c != ' ') {
 				LogError(0, NO_ERRCODE, "imtcp %s: Framing Error in received TCP message from "
 					"peer: (hostname) %s, (ip) %s: delimiter is not SP but has "
-					"ASCII value %d.", pThis->pSrv->pszInputName, propPeerName, propPeerIP, c);
+					"ASCII value %d.", cnf_params->pszInputName, propPeerName, propPeerIP, c);
 			}
 			if(pThis->iOctetsRemain < 1) {
 				/* TODO: handle the case where the octet count is 0! */
 				LogError(0, NO_ERRCODE, "imtcp %s: Framing Error in received TCP message from "
 					"peer: (hostname) %s, (ip) %s: invalid octet count %d.",
-					pThis->pSrv->pszInputName, propPeerName, propPeerIP, pThis->iOctetsRemain);
+					cnf_params->pszInputName, propPeerName, propPeerIP, pThis->iOctetsRemain);
 				pThis->eFraming = TCP_FRAMING_OCTET_STUFFING;
 			} else if(pThis->iOctetsRemain > iMaxLine) {
 				/* while we can not do anything against it, we can at least log an indication
@@ -409,13 +411,13 @@ processDataRcvd(tcps_sess_t *pThis,
 				 */
 				LogError(0, NO_ERRCODE, "imtcp %s: received oversize message from peer: "
 					"(hostname) %s, (ip) %s: size is %d bytes, max msg size "
-					"is %d, truncating...", pThis->pSrv->pszInputName, propPeerName,
+					"is %d, truncating...", cnf_params->pszInputName, propPeerName,
 					propPeerIP, pThis->iOctetsRemain, iMaxLine);
 			}
 			if(pThis->iOctetsRemain > pThis->pSrv->maxFrameSize) {
 				LogError(0, NO_ERRCODE, "imtcp %s: Framing Error in received TCP message from "
 					"peer: (hostname) %s, (ip) %s: frame too large: %d, change "
-					"to octet stuffing", pThis->pSrv->pszInputName, propPeerName, propPeerIP,
+					"to octet stuffing", cnf_params->pszInputName, propPeerName, propPeerIP,
 						pThis->iOctetsRemain);
 				pThis->eFraming = TCP_FRAMING_OCTET_STUFFING;
 			} else {
@@ -424,25 +426,26 @@ processDataRcvd(tcps_sess_t *pThis,
 			pThis->inputState = eInMsg;
 		}
 	} else if(pThis->inputState == eInMsgTruncating) {
-		if((   ((c == '\n') && !pThis->pSrv->bDisableLFDelim)
-		   || ((pThis->pSrv->addtlFrameDelim != TCPSRV_NO_ADDTL_DELIMITER)
-		        && (c == pThis->pSrv->addtlFrameDelim))
-		   ) && pThis->eFraming == TCP_FRAMING_OCTET_STUFFING) {
-			pThis->inputState = eAtStrtFram;
+		if(pThis->eFraming == TCP_FRAMING_OCTET_COUNTING) {
+			DBGPRINTF("DEBUG: TCP_FRAMING_OCTET_COUNTING eInMsgTruncating c=%c remain=%d\n",
+				c, pThis->iOctetsRemain);
+
+			pThis->iOctetsRemain--;
+			if(pThis->iOctetsRemain < 1) {
+				pThis->inputState = eAtStrtFram;
+			}
+		} else {
+			if(    ((c == '\n') && !pThis->pSrv->bDisableLFDelim)
+			    || ((pThis->pSrv->addtlFrameDelim != TCPSRV_NO_ADDTL_DELIMITER)
+			         && (c == pThis->pSrv->addtlFrameDelim))
+			    ) {
+				pThis->inputState = eAtStrtFram;
+			}
 		}
 	} else {
 		assert(pThis->inputState == eInMsg);
-		if(pThis->iMsg >= iMaxLine) {
-			/* emergency, we now need to flush, no matter if we are at end of message or not... */
-			DBGPRINTF("error: message received is larger than max msg size, we %s it\n",
-				pThis->pSrv->discardTruncatedMsg == 1 ? "truncate" : "split");
-			defaultDoSubmitMessage(pThis, stTime, ttGenTime, pMultiSub);
-			++(*pnMsgs);
-			if(pThis->pSrv->discardTruncatedMsg == 1) {
-				pThis->inputState = eInMsgTruncating;
-				FINALIZE;
-			}
-		}
+		DBGPRINTF("DEBUG: processDataRcvd c=%c remain=%d\n",
+			c, pThis->iOctetsRemain);
 
 		if((   ((c == '\n') && !pThis->pSrv->bDisableLFDelim)
 		   || ((pThis->pSrv->addtlFrameDelim != TCPSRV_NO_ADDTL_DELIMITER)
@@ -458,6 +461,23 @@ processDataRcvd(tcps_sess_t *pThis,
 			 */
 			if(pThis->iMsg < iMaxLine) {
 				*(pThis->pMsg + pThis->iMsg++) = c;
+			} else {
+				/* emergency, we now need to flush, no matter if we are at end of message or not... */
+				DBGPRINTF("error: message received is larger than max msg size, we %s it - c=%x\n",
+					pThis->pSrv->discardTruncatedMsg == 1 ? "truncate" : "split", c);
+				defaultDoSubmitMessage(pThis, stTime, ttGenTime, pMultiSub);
+				++(*pnMsgs);
+				if(pThis->pSrv->discardTruncatedMsg == 1) {
+					if (pThis->eFraming == TCP_FRAMING_OCTET_COUNTING) {
+						pThis->iOctetsRemain--;
+						if (pThis->iOctetsRemain == 0) {
+							pThis->inputState = eAtStrtFram;
+							FINALIZE;
+						}
+					}
+					pThis->inputState = eInMsgTruncating;
+					FINALIZE;
+				}
 			}
 		}
 

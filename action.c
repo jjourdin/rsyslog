@@ -866,6 +866,7 @@ actionDoRetry(action_t * const pThis, wti_t * const pWti)
 		if((iRet == RS_RET_OK) && (!bTreatOKasSusp)) {
 			DBGPRINTF("actionDoRetry: %s had success RDY again (iRet=%d)\n",
 				  pThis->pszName, iRet);
+			STATSCOUNTER_INC(pThis->ctrResume, pThis->mutCtrResume);
 			if(pThis->bReportSuspension) {
 				LogMsg(0, RS_RET_RESUMED, LOG_INFO, "action '%s' "
 					      "resumed (module '%s')",
@@ -1411,6 +1412,8 @@ actionWriteErrorFile(action_t *__restrict__ const pThis, const rsRetVal ret,
 {
 	fjson_object *etry=NULL;
 	int bNeedUnlock = 0;
+
+	STATSCOUNTER_INC(pThis->ctrFail, pThis->mutCtrFail);
 
 	if(pThis->pszErrFile == NULL) {
 		DBGPRINTF("action %s: commit failed, no error file set, silently "

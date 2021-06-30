@@ -7,7 +7,7 @@
  *
  * Module begun 2008-04-16 by Rainer Gerhards
  *
- * Copyright 2008-2019 Rainer Gerhards and Adiscon GmbH.
+ * Copyright 2008-2021 Rainer Gerhards and Adiscon GmbH.
  *
  * This file is part of the rsyslog runtime library.
  *
@@ -57,6 +57,7 @@
 #include "rsconf.h"
 #include "queue.h"
 #include "dnscache.h"
+#include "parser.h"
 
 #define REPORT_CHILD_PROCESS_EXITS_NONE 0
 #define REPORT_CHILD_PROCESS_EXITS_ERRORS 1
@@ -144,6 +145,7 @@ size_t glblDbgFilesNum = 0;
 int glblDbgWhitelist = 1;
 int glblPermitCtlC = 0;
 int glblInputTimeoutShutdown = 1000; /* input shutdown timeout in ms */
+int glblShutdownQueueDoubleSize = 0;
 static const uchar * operatingStateFile = NULL;
 
 uint64_t glblDevOptions = 0; /* to be used by developers only */
@@ -169,7 +171,7 @@ static struct cnfparamdescr cnfparamdescr[] = {
 	{ "preservefqdn", eCmdHdlrBinary, 0 },
 	{ "debug.onshutdown", eCmdHdlrBinary, 0 },
 	{ "debug.logfile", eCmdHdlrString, 0 },
-	{ "debug.gnutls", eCmdHdlrPositiveInt, 0 },
+	{ "debug.gnutls", eCmdHdlrNonNegInt, 0 },
 	{ "debug.unloadmodules", eCmdHdlrBinary, 0 },
 	{ "defaultnetstreamdrivercafile", eCmdHdlrString, 0 },
 	{ "defaultnetstreamdriverkeyfile", eCmdHdlrString, 0 },
@@ -209,6 +211,7 @@ static struct cnfparamdescr cnfparamdescr[] = {
 	{ "environment", eCmdHdlrArray, 0 },
 	{ "processinternalmessages", eCmdHdlrBinary, 0 },
 	{ "umask", eCmdHdlrFileCreateMode, 0 },
+	{ "security.abortonidresolutionfail", eCmdHdlrBinary, 0 },
 	{ "internal.developeronly.options", eCmdHdlrInt, 0 },
 	{ "internalmsg.ratelimit.interval", eCmdHdlrPositiveInt, 0 },
 	{ "internalmsg.ratelimit.burst", eCmdHdlrPositiveInt, 0 },
@@ -225,6 +228,8 @@ static struct cnfparamdescr cnfparamdescr[] = {
 	{ "default.ruleset.queue.timeoutworkerthreadshutdown", eCmdHdlrInt, 0 },
 	{ "reverselookup.cache.ttl.default", eCmdHdlrNonNegInt, 0 },
 	{ "reverselookup.cache.ttl.enable", eCmdHdlrBinary, 0 },
+	{ "parser.supportcompressionextension", eCmdHdlrBinary, 0 },
+	{ "shutdown.queue.doublesize", eCmdHdlrBinary, 0 },
 	{ "debug.files", eCmdHdlrArray, 0 },
 	{ "debug.whitelist", eCmdHdlrBinary, 0 }
 };
@@ -1440,6 +1445,8 @@ glblDoneLoadCnf(void)
 			glblInputTimeoutShutdown = (int) cnfparamvals[i].val.d.n;
 		} else if(!strcmp(paramblk.descr[i].name, "privdrop.group.keepsupplemental")) {
 			loadConf->globals.gidDropPrivKeepSupplemental = (int) cnfparamvals[i].val.d.n;
+		} else if(!strcmp(paramblk.descr[i].name, "security.abortonidresolutionfail")) {
+			loadConf->globals.abortOnIDResolutionFail = (int) cnfparamvals[i].val.d.n;
 		} else if(!strcmp(paramblk.descr[i].name, "net.acladdhostnameonfail")) {
 			*(net.pACLAddHostnameOnFail) = (int) cnfparamvals[i].val.d.n;
 		} else if(!strcmp(paramblk.descr[i].name, "net.aclresolvehostname")) {
@@ -1478,6 +1485,8 @@ glblDoneLoadCnf(void)
 			qsort(glblDbgFiles, glblDbgFilesNum, sizeof(char*), qs_arrcmp_glblDbgFiles);
 		} else if(!strcmp(paramblk.descr[i].name, "debug.whitelist")) {
 			glblDbgWhitelist = (int) cnfparamvals[i].val.d.n;
+		} else if(!strcmp(paramblk.descr[i].name, "shutdown.queue.doublesize")) {
+			glblShutdownQueueDoubleSize = (int) cnfparamvals[i].val.d.n;
 		} else if(!strcmp(paramblk.descr[i].name, "umask")) {
 			loadConf->globals.umask = (int) cnfparamvals[i].val.d.n;
 		} else if(!strcmp(paramblk.descr[i].name, "shutdown.enable.ctlc")) {
@@ -1502,6 +1511,8 @@ glblDoneLoadCnf(void)
 			dnscacheDefaultTTL = cnfparamvals[i].val.d.n;
 		} else if(!strcmp(paramblk.descr[i].name, "reverselookup.cache.ttl.enable")) {
 			dnscacheEnableTTL = cnfparamvals[i].val.d.n;
+		} else if(!strcmp(paramblk.descr[i].name, "parser.supportcompressionextension")) {
+			bSupportCompressionExtension = cnfparamvals[i].val.d.n;
 		} else {
 			dbgprintf("glblDoneLoadCnf: program error, non-handled "
 				"param '%s'\n", paramblk.descr[i].name);

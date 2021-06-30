@@ -442,10 +442,24 @@ injectmsg_kafkacat() {
 		printf 'TESTBENCH ERROR: TESTMESSAGES env var not set!\n'
 		error_exit 1
 	fi
-	for ((i=1 ; i<=TESTMESSAGES ; i++)); do
-		printf ' msgnum:%8.8d\n' $i; \
-	done | kafkacat -P -b localhost:29092 -t $RANDTOPIC 2>&1 | tee >$RSYSLOG_DYNNAME.kafkacat.log
-	kafka_check_broken_broker $RSYSLOG_DYNNAME.kafkacat.log
+	MAXATONCE=25000 # how many msgs should kafkacat send? - hint: current version errs out above ~70000
+	i=1
+	while (( i<=TESTMESSAGES )); do
+		currmsgs=0
+		while ((i <= $TESTMESSAGES && currmsgs != MAXATONCE)); do
+			printf ' msgnum:%8.8d\n' $i;
+			i=$((i + 1))
+			currmsgs=$((currmsgs+1))
+		done  > "$RSYSLOG_DYNNAME.kafkacat.in"
+		set -e
+		kafkacat -P -b localhost:29092 -t $RANDTOPIC <"$RSYSLOG_DYNNAME.kafkacat.in" 2>&1 | tee >$RSYSLOG_DYNNAME.kafkacat.log
+		set +e
+		printf 'kafkacat injected %d msgs so far\n' $((i - 1))
+		kafka_check_broken_broker $RSYSLOG_DYNNAME.kafkacat.log
+		check_not_present "ERROR" $RSYSLOG_DYNNAME.kafkacat.log
+		cat $RSYSLOG_DYNNAME.kafkacat.log
+	done
+
 	if [ "$wait" == "YES" ]; then
 		wait_seq_check "$@"
 	fi
@@ -603,7 +617,7 @@ startup_vg_noleak() {
 # same as startup-vgthread, BUT we do NOT wait on the startup message!
 startup_vgthread_waitpid_only() {
 	startup_common "$1" "$2"
-	valgrind --tool=helgrind $RS_TEST_VALGRIND_EXTRA_OPTS $RS_TESTBENCH_VALGRIND_EXTRA_OPTS --log-fd=1 --error-exitcode=10 --suppressions=$srcdir/linux_localtime_r.supp ${EXTRA_VALGRIND_SUPPRESSIONS:-} --suppressions=$srcdir/CI/gcov.supp --gen-suppressions=all ../tools/rsyslogd -C -n -i$RSYSLOG_PIDBASE$2.pid -M../runtime/.libs:../.libs -f$CONF_FILE &
+	valgrind --tool=helgrind $RS_TEST_VALGRIND_EXTRA_OPTS $RS_TESTBENCH_VALGRIND_EXTRA_OPTS --log-fd=1 --error-exitcode=10 --suppressions=$srcdir/linux_localtime_r.supp --suppressions=$srcdir/known_issues.supp ${EXTRA_VALGRIND_SUPPRESSIONS:-} --suppressions=$srcdir/CI/gcov.supp --gen-suppressions=all ../tools/rsyslogd -C -n -i$RSYSLOG_PIDBASE$2.pid -M../runtime/.libs:../.libs -f$CONF_FILE &
 	wait_rsyslog_startup_pid $2
 }
 
@@ -710,7 +724,7 @@ content_count_check() {
 		grep_opt=-F
 	fi
 	file=${3:-$RSYSLOG_OUT_LOG}
-	count=$(grep -c -F -- "$1" <${RSYSLOG_OUT_LOG})
+	count=$(grep -c $grep_opt -- "$1" <${RSYSLOG_OUT_LOG})
 	if [ ${count:=0} -ne "$2" ]; then
 	    grep -c -F -- "$1" <${RSYSLOG_OUT_LOG}
 	    printf '\n============================================================\n'
@@ -732,16 +746,19 @@ content_check_with_count() {
 	timecounter=0
 	while [  $timecounter -lt $timeoutend ]; do
 		(( timecounter=timecounter+1 ))
-		count=$(grep -c -F -- "$1" <${RSYSLOG_OUT_LOG})
+		count=0
+		if [ -f "${RSYSLOG_OUT_LOG}" ]; then
+			count=$(grep -c -F -- "$1" <${RSYSLOG_OUT_LOG})
+		fi
 		if [ ${count:=0} -eq $2 ]; then
-			echo content_check_with_count success, \"$1\" occured $2 times
+			echo content_check_with_count SUCCESS, \"$1\" occured $2 times
 			break
 		else
 			if [ "$timecounter" == "$timeoutend" ]; then
 				shutdown_when_empty ""
 				wait_shutdown ""
 
-				echo content_check_with_count failed, expected \"$1\" to occur $2 times, but found it "$count" times
+				echo "$(tb_timestamp)" content_check_with_count failed, expected \"$1\" to occur $2 times, but found it "$count" times
 				echo file $RSYSLOG_OUT_LOG content is:
 				if [ $(wc -l < "$RSYSLOG_OUT_LOG") -gt 10000 ]; then
 					printf 'truncation, we have %d lines, which is way too much\n' \
@@ -755,11 +772,13 @@ content_check_with_count() {
 				fi
 				error_exit 1
 			else
-				printf 'content_check_with_count have %d, wait for %d times (%d lines), msg: %s\n' \
-					"$count" "$2" $(wc -l < "$RSYSLOG_OUT_LOG") "$1"
+				printf '%s content_check_with_count, try %d have %d, wait for %d, search for: "%s"\n' \
+					"$(tb_timestamp)" "$timecounter" "$count" "$2" "$1"
 				$TESTTOOL_DIR/msleep 1000
 			fi
 		fi
+	printf '%s **** content_check_with_count DEBUG (timeout %s, need %s lines):\n' "$(tb_timestamp)" "$3"  "$2" # rger: REMOVE ME when problems are fixed
+	if [ -f "${RSYSLOG_OUT_LOG}" ]; then cat -n "$RSYSLOG_OUT_LOG"; fi
 	done
 }
 
@@ -1442,7 +1461,6 @@ tcpflood() {
 	else
 		check_only="no"
 	fi
-
 	eval ./tcpflood -p$TCPFLOOD_PORT "$@" $TCPFLOOD_EXTRA_OPTS
 	res=$?
 	if [ "$check_only" == "yes" ]; then
@@ -1521,8 +1539,15 @@ get_inode() {
 # check that logger supports -d option, if not skip test
 # right now this is a bit dirty, we check distros which do not support it
 check_logger_has_option_d() {
-	skip_platform "FreeBSD"  "We need logger -p option, which we do not have on FreeBSD"
-	skip_platform "SunOS"  "We need logger -p option, which we do not have on (all flavors of) Solaris"
+	skip_platform "FreeBSD"  "We need logger -d option, which we do not have on FreeBSD"
+	skip_platform "SunOS"  "We need logger -d option, which we do not have on (all flavors of) Solaris"
+
+	# check also the case for busybox
+	logger --help 2>&1 | head -n1 | grep -q BusyBox
+	if [ $? -eq 0 ]; then
+		echo "We need logger -d option, which we do not have have on Busybox"
+		exit 77
+	fi
 }
 
 
@@ -1533,6 +1558,20 @@ require_relpEngineSetTLSLibByName() {
 	  exit 77
 	fi;
 }
+
+require_relpEngineVersion() {
+	if [ "$1" == "" ]; then
+		  echo "require_relpEngineVersion missing required parameter  (minimum version required)"
+		  exit 1
+	else
+		./check_relpEngineVersion $1
+		if [ $? -eq 1 ]; then
+		  echo "relpEngineVersion too OLD. Test stopped"
+		  exit 77
+		fi;
+	fi
+}
+
 
 # check if command $1 is available - will exit 77 when not OK
 check_command_available() {
@@ -1566,13 +1605,13 @@ presort() {
 
 #START: ext kafka config
 #dep_cache_dir=$(readlink -f .dep_cache)
-export RS_ZK_DOWNLOAD=zookeeper-3.4.14.tar.gz
+export RS_ZK_DOWNLOAD=apache-zookeeper-3.6.2-bin.tar.gz
 dep_cache_dir=$(pwd)/.dep_cache
-dep_zk_url=http://www-us.apache.org/dist/zookeeper/zookeeper-3.4.14/$RS_ZK_DOWNLOAD
+dep_zk_url=https://downloads.apache.org/zookeeper/zookeeper-3.6.2/$RS_ZK_DOWNLOAD
 dep_zk_cached_file=$dep_cache_dir/$RS_ZK_DOWNLOAD
 
-export RS_KAFKA_DOWNLOAD=kafka_2.12-2.2.0.tgz
-dep_kafka_url=http://www-us.apache.org/dist/kafka/2.2.0/kafka_2.12-2.2.0.tgz
+export RS_KAFKA_DOWNLOAD=kafka_2.12-2.7.0.tgz
+dep_kafka_url=http://www-us.apache.org/dist/kafka/2.7.0/kafka_2.12-2.7.0.tgz
 dep_kafka_cached_file=$dep_cache_dir/$RS_KAFKA_DOWNLOAD
 
 if [ -z "$ES_DOWNLOAD" ]; then
@@ -1634,6 +1673,7 @@ download_kafka() {
 			cp /local_dep_cache/$RS_ZK_DOWNLOAD $dep_zk_cached_file
 		else
 			echo "Downloading zookeeper"
+			echo wget -q $dep_zk_url -O $dep_zk_cached_file
 			wget -q $dep_zk_url -O $dep_zk_cached_file
 			if [ $? -ne 0 ]
 			then
@@ -2040,7 +2080,7 @@ download_elasticsearch() {
 			printf 'ElasticSearch: satisfying dependency %s from system cache.\n' "$ES_DOWNLOAD"
 			cp /local_dep_cache/$ES_DOWNLOAD $dep_es_cached_file
 		else
-			dep_es_url="https://artifacts.elastic.co/downloads/elasticsearch/$ES_DOWNLOAD"
+			dep_es_url="https://www.rsyslog.com/files/download/rsyslog/$ES_DOWNLOAD"
 			printf 'ElasticSearch: satisfying dependency %s from %s\n' "$ES_DOWNLOAD" "$dep_es_url"
 			wget -q $dep_es_url -O $dep_es_cached_file
 		fi
@@ -2486,7 +2526,7 @@ case $1 in
 			echo "hint: was init accidentally called twice?"
 			exit 2
 		fi
-		export RSYSLOG_DYNNAME="rstb_$(./test_id $(basename $0))"
+		export RSYSLOG_DYNNAME="rstb_$(./test_id $(basename $0))$(tr -dc 'a-zA-Z0-9' < /dev/urandom | head --bytes 4)"
 		export RSYSLOG_OUT_LOG="${RSYSLOG_DYNNAME}.out.log"
 		export RSYSLOG2_OUT_LOG="${RSYSLOG_DYNNAME}_2.out.log"
 		export RSYSLOG_PIDBASE="${RSYSLOG_DYNNAME}:" # also used by instance 2!

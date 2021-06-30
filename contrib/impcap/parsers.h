@@ -116,22 +116,42 @@ data_ret_t *dns_parse(const uchar *packet, int pktSize, struct json_object *jpar
 
 
 // inline function definitions
-static inline data_ret_t *dont_parse(const uchar *packet, int pktSize, __attribute__((unused)) struct json_object *jparent);
+static inline data_ret_t *dont_parse(
+	const uchar *packet,
+	int pktSize,
+	__attribute__((unused)) struct json_object *jparent);
 
-static inline data_ret_t *eth_proto_parse(uint16_t ethProto, const uchar *packet, int pktSize, struct json_object *jparent);
+static inline data_ret_t *eth_proto_parse(
+	uint16_t ethProto,
+	const uchar *packet,
+	int pktSize,
+	struct json_object *jparent);
 
-static inline data_ret_t *ip_proto_parse(uint16_t ipProto, const uchar *packet, int pktSize, struct json_object *jparent);
+static inline data_ret_t *ip_proto_parse(
+	uint16_t ipProto,
+	const uchar *packet,
+	int pktSize,
+	struct json_object *jparent);
 
 /*
  *  Mock function to do no parsing when protocol is not a valid number
 */
-static inline data_ret_t *dont_parse(const uchar *packet, int pktSize, __attribute__((unused)) struct json_object *jparent) {
+static inline data_ret_t *dont_parse(
+	const uchar *packet,
+	int pktSize,
+	__attribute__((unused)) struct json_object *jparent)
+{
 	DBGPRINTF("protocol not handled\n");
 	RETURN_DATA_AFTER(0)
 }
 
 // proto code handlers
-static inline data_ret_t *eth_proto_parse(uint16_t ethProto, const uchar *packet, int pktSize, struct json_object *jparent) {
+static inline data_ret_t *eth_proto_parse(
+	uint16_t ethProto,
+	const uchar *packet,
+	int pktSize,
+	struct json_object *jparent)
+{
 	switch(ethProto) {
 		case ETHERTYPE_IP:
 			return ipv4_parse(packet, pktSize, jparent);
@@ -148,7 +168,12 @@ static inline data_ret_t *eth_proto_parse(uint16_t ethProto, const uchar *packet
 	}
 }
 
-static inline data_ret_t *ip_proto_parse(uint16_t ipProto, const uchar *packet, int pktSize, struct json_object *jparent) {
+static inline data_ret_t *ip_proto_parse(
+	uint16_t ipProto,
+	const uchar *packet,
+	int pktSize,
+	struct json_object *jparent)
+{
 	switch(ipProto) {
 		case IPPROTO_TCP:
 			return tcp_parse(packet, pktSize, jparent);

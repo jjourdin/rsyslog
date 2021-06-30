@@ -285,7 +285,7 @@ tplToJSON(struct template *pTpl, smsg_t *pMsg, struct json_object **pjson, struc
 	DEFiRet;
 
 	if(pTpl->bHaveSubtree){
-		if(jsonFind(pMsg->json, &pTpl->subtree, pjson) != RS_RET_OK)
+		if(jsonFind(pMsg, &pTpl->subtree, pjson) != RS_RET_OK)
 			*pjson = NULL;
 		if(*pjson == NULL) {
 			/* we need to have a root object! */
@@ -2021,7 +2021,7 @@ tplProcessCnf(struct cnfobj *o)
 	if(o->subobjs  == NULL) {
 		if(tplType == T_LIST) {
 			LogError(0, RS_RET_ERR, "template '%s' of type list has "
-				"has no parameters specified", name);
+				"no parameters specified", name);
 			ABORT_FINALIZE(RS_RET_ERR);
 		}
 	} else {

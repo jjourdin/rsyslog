@@ -8,10 +8,8 @@ add_conf '
 template(name="outfmt" type="string" string="*Matched*\n")
 
 module(load="../plugins/imtcp/.libs/imtcp")
-input(type="imtcp" port="0" listenPortFileName="'$RSYSLOG_DYNNAME'.tcpflood_port")'
-add_conf "
-if (re_match(\$msg, '.* ([0-9]+)$')) then {"
-add_conf '
+input(type="imtcp" port="0" listenPortFileName="'$RSYSLOG_DYNNAME'.tcpflood_port")
+if (re_match($msg, '"'"'.* ([0-9]+)$'"'"')) then {
 	 action(type="omfile" file="'$RSYSLOG_OUT_LOG'" template="outfmt")
 }
 '

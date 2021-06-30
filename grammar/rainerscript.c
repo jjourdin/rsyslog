@@ -142,6 +142,7 @@ tokenToString(const int token)
 	case 'V': tokstr ="V"; break;
 	case 'F': tokstr ="F"; break;
 	case 'A': tokstr ="A"; break;
+	case S_FUNC_EXISTS: tokstr ="exists()"; break;
 	default: snprintf(tokbuf, sizeof(tokbuf), "%c[%d]", token, token);
 		 tokstr = tokbuf; break;
 	}
@@ -699,6 +700,22 @@ nvlstFindNameCStr(struct nvlst *lst, const char *const __restrict__ name)
 	return lst;
 }
 
+/* check if the nvlst is disabled, and mark config.enabled directive
+ * as used if it is not. Returns 1 if block is disabled, 0 otherwise.
+ */
+int nvlstChkDisabled(struct nvlst *lst)
+{
+	struct nvlst *valnode;
+
+	if((valnode = nvlstFindNameCStr(lst, "config.enabled")) != NULL) {
+		valnode->bUsed = 1;
+		if(es_strbufcmp(valnode->val.d.estr, (unsigned char*) "on", 2)) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
 
 /* check if there are duplicate names inside a nvlst and emit
  * an error message, if so.
@@ -891,13 +908,27 @@ doGetGID(struct nvlst *valnode, struct cnfparamdescr *param,
 {
 	char *cstr;
 	int r;
-	struct group *resultBuf;
+	struct group *resultBuf = NULL;
 	struct group wrkBuf;
-	char stringBuf[2048]; /* 2048 has been proven to be large enough */
+	char *stringBuf = NULL;
+	size_t bufSize = 1024;
+	int e;
 
 	cstr = es_str2cstr(valnode->val.d.estr, NULL);
-	const int e = getgrnam_r(cstr, &wrkBuf, stringBuf,
-		sizeof(stringBuf), &resultBuf);
+	do {
+		char *p;
+
+		/* Increase bufsize and try again.*/
+		bufSize *= 2;
+		p = realloc(stringBuf, bufSize);
+		if(!p) {
+			e = ENOMEM;
+			break;
+		}
+		stringBuf = p;
+		e = getgrnam_r(cstr, &wrkBuf, stringBuf, bufSize, &resultBuf);
+	} while(!resultBuf && (e == ERANGE));
+
 	if(resultBuf == NULL) {
 		if(e != 0) {
 			LogError(e, RS_RET_ERR, "parameter '%s': error to "
@@ -913,6 +944,7 @@ doGetGID(struct nvlst *valnode, struct cnfparamdescr *param,
 		   param->name, (int) resultBuf->gr_gid, cstr);
 		r = 1;
 	}
+	free(stringBuf);
 	free(cstr);
 	return r;
 }
@@ -1204,23 +1236,6 @@ nvlstGetParams(struct nvlst *lst, struct cnfparamblk *params,
 		}
 		if(!nvlstGetParam(valnode, param, vals + i)) {
 			bInError = 1;
-		}
-	}
-
-	/* now config-system parameters (currently a bit hackish, as we
-	 * only have one...). -- rgerhards, 2018-01-24
-	 */
-	if((valnode = nvlstFindNameCStr(lst, "config.enabled")) != NULL) {
-		if(es_strbufcmp(valnode->val.d.estr, (unsigned char*) "on", 2)) {
-			dbgprintf("config object disabled by configuration\n");
-			/* flag all params as used to not emit error mssages */
-			bInError = 1;
-			struct nvlst *val;
-			for(val = lst; val != NULL ; val = val->next) {
-				val->bUsed = 1;
-			}
-		} else {
-			valnode->bUsed = 1;
 		}
 	}
 
@@ -1814,6 +1829,129 @@ finalize_it:
 	varFreeMembers(&srcVal[1]);
 }
 
+
+static void ATTR_NONNULL()
+doFunc_get_property(struct cnffunc *__restrict__ const func,
+	struct svar *__restrict__ const ret,
+	void *const usrptr,
+	wti_t *const pWti)
+{
+	int retVal = RS_SCRIPT_EOK;
+	int bMustFree = 0;
+	char *expr = NULL;
+	struct svar srcVal[2] = {{.d={0}, .datatype=0}};
+	struct json_object *json = NULL;
+
+	/* ignore string literals */
+	if (func->expr[0]->nodetype == 'S') {
+		retVal = RS_SCRIPT_EINVAL;
+		FINALIZE;
+	}
+
+	cnfexprEval(func->expr[0], &srcVal[0], usrptr, pWti);
+	cnfexprEval(func->expr[1], &srcVal[1], usrptr, pWti);
+	DBGPRINTF("srcval[0] datatype: %c\n", srcVal[0].datatype);
+	DBGPRINTF("srcval[1] datatype: %c\n", srcVal[1].datatype);
+
+	switch (srcVal[0].datatype) {
+		case 'J': {
+			json = srcVal[0].d.json;
+			break;
+		}
+		case 'S': {
+			ret->d.estr = es_strdup(srcVal[0].d.estr);
+			ret->datatype = 'S';
+			FINALIZE;
+			break;
+		}
+		default: {
+			ret->d.estr = es_newStrFromCStr("", 1);
+			ret->datatype = 'S';
+			FINALIZE;
+			break;
+		}
+	}
+
+	switch (json_object_get_type(json)) {
+		case json_type_object: {
+			expr = (char*) var2CString(&srcVal[1], &bMustFree);
+			if (expr && expr[0] == '\0') {
+				ret->d.json = json_object_get(json);
+				ret->datatype = 'J';
+				break;
+			}
+			if (expr && !json_object_object_get_ex(json, (char*)expr, &ret->d.json)) {
+					retVal = RS_SCRIPT_EINVAL;
+					FINALIZE;
+			}
+			if (ret->d.json) {
+				ret->d.json = json_object_get(ret->d.json);
+				ret->datatype = 'J';
+			} else {
+				ret->d.estr = es_newStrFromCStr("", 1);
+				ret->datatype = 'S';
+			}
+			break;
+		}
+		case json_type_array: {
+			int success = 0;
+			long long index = var2Number(&srcVal[1], &success);
+			if (!success || index < 0 || (size_t)index >= sizeof(size_t)) {
+				retVal = RS_SCRIPT_EINVAL;
+				FINALIZE;
+			}
+			ret->d.json = json_object_array_get_idx(json, index);
+			if (ret->d.json) {
+				ret->d.json = json_object_get(ret->d.json);
+				ret->datatype = 'J';
+			} else {
+				ret->d.estr = es_newStrFromCStr("", 1);
+				ret->datatype = 'S';
+			}
+			break;
+		}
+		case json_type_boolean:
+		case json_type_int: {
+			ret->d.n = json_object_get_int64(json);
+			ret->datatype = 'N';
+			break;
+		}
+		case json_type_double: {
+			ret->d.n = json_object_get_double(json);
+			ret->datatype = 'N';
+			break;
+		}
+		case json_type_string: {
+			ret->d.estr = es_newStrFromCStr(json_object_get_string(json), json_object_get_string_len(json));
+			ret->datatype = 'S';
+			break;
+		}
+		case json_type_null: {
+			ret->datatype = 'S';
+			ret->d.estr = es_newStrFromCStr("", 1);
+			break;
+		}
+		default:
+			LogError(0, RS_RET_INTERNAL_ERROR,
+				"Warning - unhandled json type(%d) !!!!\n", json_object_get_type(json));
+			retVal = RS_SCRIPT_EINVAL;
+			break;
+	}
+
+finalize_it:
+	wtiSetScriptErrno(pWti, retVal);
+
+	if (retVal != RS_SCRIPT_EOK) {
+		ret->datatype = 'S';
+		ret->d.estr = es_newStrFromCStr("", 1);
+	}
+	if (bMustFree) {
+		free(expr);
+	}
+	varFreeMembers(&srcVal[0]);
+	varFreeMembers(&srcVal[1]);
+}
+
 static void ATTR_NONNULL()
 doFunct_RandomGen(struct cnffunc *__restrict__ const func,
 	struct svar *__restrict__ const ret,
@@ -2353,6 +2491,7 @@ doFunct_Lookup(struct cnffunc *__restrict__ const func,
 	struct svar srcVal;
 	lookup_key_t key;
 	uint8_t lookup_key_type;
+	lookup_ref_t *lookup_table_ref;
 	lookup_t *lookup_table;
 	int bMustFree;
 
@@ -2362,7 +2501,9 @@ doFunct_Lookup(struct cnffunc *__restrict__ const func,
 		return;
 	}
 	cnfexprEval(func->expr[1], &srcVal, usrptr, pWti);
-	lookup_table = ((lookup_ref_t*)func->funcdata)->self;
+	lookup_table_ref = (lookup_ref_t*) func->funcdata;
+	pthread_rwlock_rdlock(&lookup_table_ref->rwlock);
+	lookup_table = lookup_table_ref->self;
 	if (lookup_table != NULL) {
 		lookup_key_type = lookup_table->key_type;
 		bMustFree = 0;
@@ -2382,6 +2523,7 @@ doFunct_Lookup(struct cnffunc *__restrict__ const func,
 	} else {
 		ret->d.estr = es_newStrFromCStr("", 1);
 	}
+	pthread_rwlock_unlock(&lookup_table_ref->rwlock);
 	varFreeMembers(&srcVal);
 }
 
@@ -2734,6 +2876,27 @@ doFuncCall(struct cnffunc *__restrict__ const func, struct svar *__restrict__ co
 	} else {
 		func->fPtr(func, ret, usrptr, pWti);
 	}
+}
+
+
+/* Perform the special "exists()" function to check presence of a variable.
+ */
+static int ATTR_NONNULL()
+evalFuncExists(struct cnffuncexists *__restrict__ const fexists, void *__restrict__ const usrptr)
+{
+	int r = 0;
+	rsRetVal localRet;
+
+	if(fexists->prop.id == PROP_CEE        ||
+	   fexists->prop.id == PROP_LOCAL_VAR  ||
+	   fexists->prop.id == PROP_GLOBAL_VAR   ) {
+		localRet = msgCheckVarExists((smsg_t*)usrptr, &fexists->prop);
+		if(localRet == RS_RET_OK) {
+			r = 1;
+		}
+	}
+
+	return r;
 }
 
 static void
@@ -3338,6 +3501,10 @@ cnfexprEval(const struct cnfexpr *__restrict__ const expr,
 	case 'F':
 		doFuncCall((struct cnffunc*) expr, ret, usrptr, pWti);
 		break;
+	case S_FUNC_EXISTS:
+		ret->datatype = 'N';
+		ret->d.n = evalFuncExists((struct cnffuncexists*) expr, usrptr);
+		break;
 	default:
 		ret->datatype = 'N';
 		ret->d.n = 0ll;
@@ -3402,7 +3569,7 @@ finalize_it:
 }
 
 static rsRetVal
-initFunc_re_match(struct cnffunc *func)
+initFunc_re_match_generic(struct cnffunc *const func, const unsigned flags)
 {
 	rsRetVal localRet;
 	char *regex = NULL;
@@ -3428,7 +3595,7 @@ initFunc_re_match(struct cnffunc *func)
 
 	if((localRet = objUse(regexp, LM_REGEXP_FILENAME)) == RS_RET_OK) {
 		int errcode;
-		if((errcode = regexp.regcomp(re, (char*) regex, REG_EXTENDED)) != 0) {
+		if((errcode = regexp.regcomp(re, (char*) regex, REG_EXTENDED | flags)) != 0) {
 			char errbuff[512];
 			regexp.regerror(errcode, re, errbuff, sizeof(errbuff));
 			parser_errmsg("cannot compile regex '%s': %s", regex, errbuff);
@@ -3442,6 +3609,18 @@ initFunc_re_match(struct cnffunc *func)
 finalize_it:
 	free(regex);
 	RETiRet;
+}
+
+static rsRetVal
+initFunc_re_match(struct cnffunc *func)
+{
+	return initFunc_re_match_generic(func, 0);
+}
+
+static rsRetVal
+initFunc_re_match_i(struct cnffunc *func)
+{
+	return initFunc_re_match_generic(func, REG_ICASE);
 }
 
 static rsRetVal
@@ -3562,7 +3741,9 @@ static struct scriptFunct functions[] = {
 	{"ip42num", 1, 1, doFunct_Ipv42num, NULL, NULL},
 	{"ipv42num", 1, 1, doFunct_Ipv42num, NULL, NULL},
 	{"re_match", 2, 2, doFunct_ReMatch, initFunc_re_match, regex_destruct},
+	{"re_match_i", 2, 2, doFunct_ReMatch, initFunc_re_match_i, regex_destruct},
 	{"re_extract", 5, 5, doFunc_re_extract, initFunc_re_match, regex_destruct},
+	{"re_extract_i", 5, 5, doFunc_re_extract, initFunc_re_match_i, regex_destruct},
 	{"field", 3, 3, doFunct_Field, NULL, NULL},
 	{"exec_template", 1, 1, doFunc_exec_template, initFunc_exec_template, NULL},
 	{"prifilt", 1, 1, doFunct_Prifilt, initFunc_prifilt, NULL},
@@ -3575,6 +3756,7 @@ static struct scriptFunct functions[] = {
 	{"parse_time", 1, 1, doFunct_ParseTime, NULL, NULL},
 	{"is_time", 1, 2, doFunct_IsTime, NULL, NULL},
 	{"parse_json", 2, 2, doFunc_parse_json, NULL, NULL},
+	{"get_property", 2, 2, doFunc_get_property, NULL, NULL},
 	{"script_error", 0, 0, doFunct_ScriptError, NULL, NULL},
 	{"previous_action_suspended", 0, 0, doFunct_PreviousActionSuspended, NULL, NULL},
 	{NULL, 0, 0, NULL, NULL, NULL} //last element to check end of array
@@ -3872,6 +4054,10 @@ cnfexprPrint(struct cnfexpr *expr, int indent)
 		doIndent(indent);
 		dbgprintf("NOT\n");
 		cnfexprPrint(expr->r, indent+1);
+		break;
+	case S_FUNC_EXISTS:
+		doIndent(indent);
+		dbgprintf("exists(%s)\n", ((struct cnffuncexists*)expr)->varname);
 		break;
 	case 'S':
 		doIndent(indent);
@@ -4418,8 +4604,13 @@ cnfstmtNewAct(struct nvlst *lst)
 	struct cnfstmt* cnfstmt;
 	char namebuf[256];
 	rsRetVal localRet;
-	if((cnfstmt = cnfstmtNew(S_ACT)) == NULL)
+	if((cnfstmt = cnfstmtNew(S_ACT)) == NULL) {
 		goto done;
+	}
+	if (nvlstChkDisabled(lst)) {
+		dbgprintf("action disabled by configuration\n");
+		cnfstmt->nodetype = S_NOP;
+	}
 	localRet = actionNewInst(lst, &cnfstmt->d.act);
 	if(localRet == RS_RET_OK_WARN) {
 		parser_errmsg("warnings occured in file '%s' around line %d",
@@ -5022,7 +5213,7 @@ cnfstmtOptimize(struct cnfstmt *root)
 			break;
 		case S_STOP:
 			if(stmt->next != NULL)
-				parser_errmsg("STOP is followed by unreachable statements!\n");
+				parser_warnmsg("STOP is followed by unreachable statements!\n");
 			break;
 		case S_UNSET: /* nothing to do */
 			break;
@@ -5178,6 +5369,23 @@ cnffuncNew_prifilt(int fac)
 }
 
 
+/* The check-if-variable exists "exists($!var)" is a special beast and as such
+ * also needs special code (we must not evaluate the var but need its name).
+ */
+struct cnffuncexists * ATTR_NONNULL()
+cnffuncexistsNew(const char *const varname)
+{
+	struct cnffuncexists* f_exists;
+
+	if((f_exists = malloc(sizeof(struct cnffuncexists))) != NULL) {
+		f_exists->nodetype = S_FUNC_EXISTS;
+		f_exists->varname = varname;
+		msgPropDescrFill(&f_exists->prop, (uchar*)varname, strlen(varname));
+	}
+	return f_exists;
+}
+
+
 /* returns 0 if everything is OK and config parsing shall continue,
  * and 1 if things are so wrong that config parsing shall be aborted.
  */
@@ -5281,6 +5489,11 @@ includeProcessCnf(struct nvlst *const lst)
 	if(lst == NULL) {
 		parser_errmsg("include() must have either 'file' or 'text' "
 			"parameter - ignored");
+		goto done;
+	}
+
+	if (nvlstChkDisabled(lst)) {
+		DBGPRINTF("include statement disabled\n");
 		goto done;
 	}
 

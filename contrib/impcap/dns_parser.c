@@ -6,8 +6,6 @@
  *
  * Created by:
  *  - Kevin Guillemot (kevin.guillemot@advens.fr)
- * With:
- *  - Théo Bertin (theo.bertin@advens.fr)
  *
  * This file is part of rsyslog.
  *

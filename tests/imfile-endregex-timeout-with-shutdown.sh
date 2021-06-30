@@ -2,11 +2,14 @@
 # This is part of the rsyslog testbench, licensed under ASL 2.0
 . ${srcdir:=.}/diag.sh init
 . $srcdir/diag.sh check-inotify-only
-export IMFILECHECKTIMEOUT="60"
+export IMFILECHECKTIMEOUT="90"
 
+mkdir ${RSYSLOG_DYNNAME}.statefiles
+touch $RSYSLOG_DYNNAME.input # prevent misleading rsyslog diagnostic on startup
 generate_conf
 add_conf '
-module(load="../plugins/imfile/.libs/imfile" timeoutGranularity="1")
+module(load="../plugins/imfile/.libs/imfile" timeoutGranularity="1"
+       statefile.Directory="'${RSYSLOG_DYNNAME}'.statefiles")
 
 input(type="imfile" File="./'$RSYSLOG_DYNNAME'.input" Tag="file:"
       PersistStateInterval="1" readTimeout="2" startmsg.regex="^[^ ]")
@@ -18,7 +21,7 @@ template(name="outfmt" type="list") {
 }
 
 if $msg contains "msgnum:" then
-	action( type="omfile" file=`echo $RSYSLOG_OUT_LOG` template="outfmt")
+	action( type="omfile" file="'$RSYSLOG_OUT_LOG'" template="outfmt")
 '
 startup
 
@@ -33,18 +36,22 @@ echo ' msgnum:2
 
 # we now do a stop and restart of rsyslog. This checks that everything
 # works across restarts.
-shutdown_when_empty # shut down rsyslogd when done processing messages
-wait_shutdown    # we need to wait until rsyslogd is finished!
+shutdown_when_empty
+wait_shutdown
+
+# re-start (so we read persisted state file)
 startup
 
 # new data
 echo ' msgnum:4' >> $RSYSLOG_DYNNAME.input
+echo INPUT FILE NOW: ; cat -n $RSYSLOG_DYNNAME.input
 content_check_with_count "msgnum:2
  msgnum:3
  msgnum:4" 1 $IMFILECHECKTIMEOUT
 
 echo ' msgnum:5
  msgnum:6' >> $RSYSLOG_DYNNAME.input
+echo INPUT FILE NOW: ; cat -n $RSYSLOG_DYNNAME.input
 content_check_with_count "msgnum:5
  msgnum:6" 1 $IMFILECHECKTIMEOUT
 

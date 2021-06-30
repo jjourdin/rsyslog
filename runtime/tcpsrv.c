@@ -21,7 +21,7 @@
  * File begun on 2007-12-21 by RGerhards (extracted from syslogd.c[which was
  * licensed under BSD at the time of the rsyslog fork])
  *
- * Copyright 2007-2018 Adiscon GmbH.
+ * Copyright 2007-2021 Adiscon GmbH.
  *
  * This file is part of rsyslog.
  *
@@ -123,9 +123,7 @@ static int wrkrRunning;
  * rgerhards, 2009-05-21
  */
 static rsRetVal ATTR_NONNULL(1, 2)
-addNewLstnPort(tcpsrv_t *const pThis, const uchar *const pszPort,
-	const int bSuppOctetFram, const uchar *const pszAddr,
-	const uchar *const pszLstnPortFileName)
+addNewLstnPort(tcpsrv_t *const pThis, tcpLstnParams_t *const cnf_params)
 {
 	tcpLstnPortList_t *pEntry;
 	uchar statname[64];
@@ -135,25 +133,13 @@ addNewLstnPort(tcpsrv_t *const pThis, const uchar *const pszPort,
 
 	/* create entry */
 	CHKmalloc(pEntry = (tcpLstnPortList_t*)calloc(1, sizeof(tcpLstnPortList_t)));
-	CHKmalloc(pEntry->pszPort = ustrdup(pszPort));
+	pEntry->cnf_params = cnf_params;
 
-	pEntry->pszAddr = NULL;
-	/* only if a bind adress is defined copy it in struct */
-	if (pszAddr != NULL) {
-		CHKmalloc(pEntry->pszAddr = ustrdup(pszAddr));
-	}
-
-	strcpy((char*)pEntry->dfltTZ, (char*)pThis->dfltTZ);
-	pEntry->bSPFramingFix = pThis->bSPFramingFix;
+	strcpy((char*)pEntry->cnf_params->dfltTZ, (char*)pThis->dfltTZ);
+	pEntry->cnf_params->bSPFramingFix = pThis->bSPFramingFix;
+	pEntry->cnf_params->bPreserveCase = pThis->bPreserveCase;
 	pEntry->pSrv = pThis;
-	pEntry->pRuleset = pThis->pRuleset;
-	pEntry->bSuppOctetFram = bSuppOctetFram;
-	pEntry->pszLstnPortFileName = pszLstnPortFileName;
 
-	/* we need to create a property */
-	CHKiRet(prop.Construct(&pEntry->pInputName));
-	CHKiRet(prop.SetString(pEntry->pInputName, pThis->pszInputName, ustrlen(pThis->pszInputName)));
-	CHKiRet(prop.ConstructFinalize(pEntry->pInputName));
 
 	/* support statistics gathering */
 	CHKiRet(ratelimitNew(&pEntry->ratelimiter, "tcperver", NULL));
@@ -161,7 +147,7 @@ addNewLstnPort(tcpsrv_t *const pThis, const uchar *const pszPort,
 	ratelimitSetThreadSafe(pEntry->ratelimiter);
 
 	CHKiRet(statsobj.Construct(&(pEntry->stats)));
-	snprintf((char*)statname, sizeof(statname), "%s(%s)", pThis->pszInputName, pszPort);
+	snprintf((char*)statname, sizeof(statname), "%s(%s)", cnf_params->pszInputName, cnf_params->pszPort);
 	statname[sizeof(statname)-1] = '\0'; /* just to be on the save side... */
 	CHKiRet(statsobj.SetName(pEntry->stats, statname));
 	CHKiRet(statsobj.SetOrigin(pEntry->stats, pThis->pszOrigin));
@@ -177,10 +163,8 @@ addNewLstnPort(tcpsrv_t *const pThis, const uchar *const pszPort,
 finalize_it:
 	if(iRet != RS_RET_OK) {
 		if(pEntry != NULL) {
-			free(pEntry->pszAddr);
-			free(pEntry->pszPort);
-			if(pEntry->pInputName != NULL) {
-				prop.Destruct(&pEntry->pInputName);
+			if(pEntry->cnf_params->pInputName != NULL) {
+				prop.Destruct(&pEntry->cnf_params->pInputName);
 			}
 			if(pEntry->ratelimiter != NULL) {
 				ratelimitDestruct(pEntry->ratelimiter);
@@ -201,29 +185,25 @@ finalize_it:
  * rgerhards, 2008-03-20
  */
 static rsRetVal ATTR_NONNULL(1,2)
-configureTCPListen(tcpsrv_t *const pThis,
-	const uchar *const pszPort,
-	const int bSuppOctetFram,
-	const uchar *const pszAddr,
-	const uchar *const pszLstnPortFileName)
+configureTCPListen(tcpsrv_t *const pThis, tcpLstnParams_t *const cnf_params)
 {
+	assert(cnf_params->pszPort != NULL);
 	int i;
-	const uchar *pPort = pszPort;
 	DEFiRet;
 
-	assert(pszPort != NULL);
 	ISOBJ_TYPE_assert(pThis, tcpsrv);
 
 	/* extract port */
+	const uchar *pPort = cnf_params->pszPort;
 	i = 0;
 	while(isdigit((int) *pPort)) {
 		i = i * 10 + *pPort++ - '0';
 	}
 
 	if(i >= 0 && i <= 65535) {
-		CHKiRet(addNewLstnPort(pThis, pszPort, bSuppOctetFram, pszAddr, pszLstnPortFileName));
+		CHKiRet(addNewLstnPort(pThis, cnf_params));
 	} else {
-		LogError(0, NO_ERRCODE, "Invalid TCP listen port %s - ignored.\n", pszPort);
+		LogError(0, NO_ERRCODE, "Invalid TCP listen port %s - ignored.\n", cnf_params->pszPort);
 	}
 
 finalize_it:
@@ -331,8 +311,12 @@ deinit_tcp_listener(tcpsrv_t *const pThis)
 	/* free list of tcp listen ports */
 	pEntry = pThis->pLstnPorts;
 	while(pEntry != NULL) {
-		free(pEntry->pszPort);
-		prop.Destruct(&pEntry->pInputName);
+		prop.Destruct(&pEntry->cnf_params->pInputName);
+		free((void*)pEntry->cnf_params->pszInputName);
+		free((void*)pEntry->cnf_params->pszPort);
+		free((void*)pEntry->cnf_params->pszAddr);
+		free((void*)pEntry->cnf_params->pszLstnPortFileName);
+		free((void*)pEntry->cnf_params);
 		ratelimitDestruct(pEntry->ratelimiter);
 		statsobj.Destruct(&(pEntry->stats));
 		pDel = pEntry;
@@ -373,22 +357,21 @@ finalize_it:
 
 
 /* Initialize TCP listener socket for a single port
+ * Note: at this point, TLS vs. non-TLS does not matter; TLS params are
+ * set on connect!
  * rgerhards, 2009-05-21
  */
 static rsRetVal
 initTCPListener(tcpsrv_t *pThis, tcpLstnPortList_t *pPortEntry)
 {
 	DEFiRet;
-	uchar *TCPLstnPort;
 
 	ISOBJ_TYPE_assert(pThis, tcpsrv);
 	assert(pPortEntry != NULL);
 
-	TCPLstnPort = pPortEntry->pszPort;
-
 	// pPortEntry->pszAddr = NULL ==> bind to all interfaces
-	CHKiRet(netstrm.LstnInit(pThis->pNS, (void*)pPortEntry, addTcpLstn, TCPLstnPort,
-		pPortEntry->pszAddr, pThis->iSessMax, (uchar*)pPortEntry->pszLstnPortFileName));
+	CHKiRet(netstrm.LstnInit(pThis->pNS, (void*)pPortEntry, addTcpLstn,
+		pThis->iSessMax, pPortEntry->cnf_params));
 
 finalize_it:
 	RETiRet;
@@ -411,8 +394,8 @@ create_tcp_socket(tcpsrv_t *pThis)
 		localRet = initTCPListener(pThis, pEntry);
 		if(localRet != RS_RET_OK) {
 			LogError(0, localRet, "Could not create tcp listener, ignoring port "
-			"%s bind-address %s.", pEntry->pszPort,
-			(pEntry->pszAddr == NULL) ? "(null)" : (const char*)pEntry->pszAddr);
+			"%s bind-address %s.", pEntry->cnf_params->pszPort,
+			(pEntry->cnf_params->pszAddr == NULL) ? "(null)" : (const char*)pEntry->cnf_params->pszAddr);
 		}
 		pEntry = pEntry->pNext;
 	}
@@ -451,6 +434,7 @@ SessAccept(tcpsrv_t *pThis, tcpLstnPortList_t *pLstnInfo, tcps_sess_t **ppSess, 
 	DEFiRet;
 	tcps_sess_t *pSess = NULL;
 	netstrm_t *pNewStrm = NULL;
+	const tcpLstnParams_t *const cnf_params = pLstnInfo->cnf_params;
 	int iSess = -1;
 	struct sockaddr_storage *addr;
 	uchar *fromHostFQDN = NULL;
@@ -488,7 +472,7 @@ SessAccept(tcpsrv_t *pThis, tcpLstnPortList_t *pLstnInfo, tcps_sess_t **ppSess, 
 
 	/* get the host name */
 	CHKiRet(netstrm.GetRemoteHName(pNewStrm, &fromHostFQDN));
-	if (!pThis->bPreserveCase) {
+	if (!cnf_params->bPreserveCase) {
 		/* preserve_case = off */
 		uchar *p;
 		for(p = fromHostFQDN; *p; p++) {
@@ -655,12 +639,15 @@ static rsRetVal ATTR_NONNULL(1)
 processWorksetItem(tcpsrv_t *const pThis, nspoll_t *pPoll, const int idx, void *pUsr)
 {
 	tcps_sess_t *pNewSess = NULL;
+	tcpLstnParams_t *cnf_params;
+
 	DEFiRet;
 
 	DBGPRINTF("tcpsrv: processing item %d, pUsr %p, bAbortConn\n", idx, pUsr);
 	if(pUsr == pThis->ppLstn) {
 		DBGPRINTF("New connect on NSD %p.\n", pThis->ppLstn[idx]);
 		iRet = SessAccept(pThis, pThis->ppLstnPort[idx], &pNewSess, pThis->ppLstn[idx]);
+		cnf_params = pThis->ppLstnPort[idx]->cnf_params;
 		if(iRet == RS_RET_OK) {
 			if(pPoll != NULL) {
 				CHKiRet(nspoll.Ctl(pPoll, pNewSess->pStrm, 0, pNewSess, NSDPOLL_IN, NSDPOLL_ADD));
@@ -671,6 +658,7 @@ processWorksetItem(tcpsrv_t *const pThis, nspoll_t *pPoll, const int idx, void *
 		}
 	} else {
 		pNewSess = (tcps_sess_t*) pUsr;
+		cnf_params = pNewSess->pLstnInfo->cnf_params;
 		doReceive(pThis, &pNewSess, pPoll);
 		if(pPoll == NULL && pNewSess == NULL) {
 			pThis->pSessions[idx] = NULL;
@@ -678,6 +666,12 @@ processWorksetItem(tcpsrv_t *const pThis, nspoll_t *pPoll, const int idx, void *
 	}
 
 finalize_it:
+	if(iRet != RS_RET_OK) {
+		LogError(0, iRet, "tcpsrv listener (inputname: '%s') failed "
+			"to processed incoming connection with error %d",
+			(cnf_params->pszInputName == NULL) ? (uchar*)"*UNSET*" : cnf_params->pszInputName, iRet);
+		srSleep(0,20000); /* Sleep 20ms */
+	}
 	RETiRet;
 }
 
@@ -711,7 +705,7 @@ wrkr(void *const myself)
 		pthread_mutex_lock(&wrkrMut);
 		me->pSrv = NULL;	/* indicate we are free again */
 		--wrkrRunning;
-		pthread_cond_signal(&wrkrIdle);
+		pthread_cond_broadcast(&wrkrIdle);
 	}
 	me->enabled = 0; /* indicate we are no longer available */
 	pthread_mutex_unlock(&wrkrMut);
@@ -918,7 +912,6 @@ Run(tcpsrv_t *pThis)
 {
 	DEFiRet;
 	int i;
-	int bFailed; /* If set to TRUE, accept failed */
 	nsd_epworkset_t workset[128]; /* 128 is currently fixed num of concurrent requests */
 	int numEntries;
 	nspoll_t *pPoll = NULL;
@@ -967,7 +960,6 @@ Run(tcpsrv_t *pThis)
 		DBGPRINTF("Added listener %d\n", i);
 	}
 
-	bFailed = FALSE;
 	while(glbl.GetGlobalInputTermState() == 0) {
 		numEntries = sizeof(workset)/sizeof(nsd_epworkset_t);
 		localRet = nspoll.Wait(pPoll, -1, &numEntries, workset);
@@ -981,25 +973,7 @@ Run(tcpsrv_t *pThis)
 		if(localRet != RS_RET_OK)
 			continue;
 
-		localRet = processWorkset(pThis, pPoll, numEntries, workset);
-		if(localRet != RS_RET_OK) {
-			if (bFailed == FALSE) {
-				LogError(0, localRet, "tcpsrv listener (inputname: '%s') failed "
-				"to processed incoming connection with error %d",
-				(pThis->pszInputName == NULL) ? (uchar*)"*UNSET*" : pThis->pszInputName, localRet);
-				bFailed = TRUE;
-			} else {
-				DBGPRINTF("tcpsrv listener (inputname: '%s') still failing to process "
-						"incoming connection with error %d\n",
-						(pThis->pszInputName == NULL) ? (uchar*)"*UNSET*" :
-						pThis->pszInputName, localRet);
-			}
-			/* Sleep 20ms */
-			srSleep(0,20000);
-		} else {
-			/* Reset bFailed State */
-			bFailed = FALSE;
-		}
+		processWorkset(pThis, pPoll, numEntries, workset);
 	}
 
 	/* remove the tcp listen sockets from the epoll set */
@@ -1051,8 +1025,9 @@ tcpsrvConstructFinalize(tcpsrv_t *pThis)
 	CHKiRet(netstrms.SetDrvrTlsVerifyDepth(pThis->pNS, pThis->DrvrTlsVerifyDepth));
 	if(pThis->pszDrvrAuthMode != NULL)
 		CHKiRet(netstrms.SetDrvrAuthMode(pThis->pNS, pThis->pszDrvrAuthMode));
-	if(pThis->pszDrvrPermitExpiredCerts != NULL)
-		CHKiRet(netstrms.SetDrvrPermitExpiredCerts(pThis->pNS, pThis->pszDrvrPermitExpiredCerts));
+	/* Call SetDrvrPermitExpiredCerts required
+	 * when param is NULL default handling for ExpiredCerts is set! */
+	CHKiRet(netstrms.SetDrvrPermitExpiredCerts(pThis->pNS, pThis->pszDrvrPermitExpiredCerts));
 	if(pThis->pPermPeers != NULL)
 		CHKiRet(netstrms.SetDrvrPermPeers(pThis->pNS, pThis->pPermPeers));
 	if(pThis->gnutlsPriorityString != NULL)
@@ -1235,15 +1210,6 @@ SetGnutlsPriorityString(tcpsrv_t *pThis, uchar *iVal)
 	RETiRet;
 }
 
-static rsRetVal
-SetLstnPortFileName(tcpsrv_t *pThis, uchar *iVal)
-{
-	DEFiRet;
-	DBGPRINTF("tcpsrv: LstnPortFileName set to %s\n",
-		(iVal == NULL) ? "(null)" : (const char*) iVal);
-	pThis->pszLstnPortFileName = iVal;
-	RETiRet;
-}
 
 static rsRetVal
 SetOnMsgReceive(tcpsrv_t *pThis, rsRetVal (*OnMsgReceive)(tcps_sess_t*, uchar*, int))
@@ -1334,17 +1300,21 @@ SetOrigin(tcpsrv_t *pThis, uchar *origin)
 
 /* Set the input name to use -- rgerhards, 2008-12-10 */
 static rsRetVal
-SetInputName(tcpsrv_t *pThis, uchar *name)
+SetInputName(tcpsrv_t *const pThis,tcpLstnParams_t *const cnf_params, const uchar *const name)
 {
-	uchar *pszName;
 	DEFiRet;
 	ISOBJ_TYPE_assert(pThis, tcpsrv);
 	if(name == NULL)
-		pszName = NULL;
+		cnf_params->pszInputName = NULL;
 	else
-		CHKmalloc(pszName = ustrdup(name));
-	free(pThis->pszInputName);
-	pThis->pszInputName = pszName;
+		CHKmalloc(cnf_params->pszInputName = ustrdup(name));
+	free(pThis->pszInputName); // TODO: REMOVE ME
+	pThis->pszInputName = ustrdup("imtcp"); // TODO: REMOVE ME
+
+	/* we need to create a property */
+	CHKiRet(prop.Construct(&cnf_params->pInputName));
+	CHKiRet(prop.SetString(cnf_params->pInputName, cnf_params->pszInputName, ustrlen(cnf_params->pszInputName)));
+	CHKiRet(prop.ConstructFinalize(cnf_params->pInputName));
 finalize_it:
 	RETiRet;
 }
@@ -1357,16 +1327,6 @@ SetLinuxLikeRatelimiters(tcpsrv_t *pThis, unsigned int ratelimitInterval, unsign
 	DEFiRet;
 	pThis->ratelimitInterval = ratelimitInterval;
 	pThis->ratelimitBurst = ratelimitBurst;
-	RETiRet;
-}
-
-
-/* Set the ruleset (ptr) to use */
-static rsRetVal
-SetRuleset(tcpsrv_t *pThis, ruleset_t *pRuleset)
-{
-	DEFiRet;
-	pThis->pRuleset = pRuleset;
 	RETiRet;
 }
 
@@ -1388,7 +1348,7 @@ SetNotificationOnRemoteClose(tcpsrv_t *pThis, int bNewVal)
 
 /* set the driver mode -- rgerhards, 2008-04-30 */
 static rsRetVal
-SetDrvrMode(tcpsrv_t *pThis, int iMode)
+SetDrvrMode(tcpsrv_t *pThis, const int iMode)
 {
 	DEFiRet;
 	ISOBJ_TYPE_assert(pThis, tcpsrv);
@@ -1397,7 +1357,7 @@ SetDrvrMode(tcpsrv_t *pThis, int iMode)
 }
 
 static rsRetVal
-SetDrvrName(tcpsrv_t *pThis, uchar *name)
+SetDrvrName(tcpsrv_t *pThis, uchar *const name)
 {
 	DEFiRet;
 	ISOBJ_TYPE_assert(pThis, tcpsrv);
@@ -1409,7 +1369,7 @@ finalize_it:
 
 /* set the driver authentication mode -- rgerhards, 2008-05-19 */
 static rsRetVal
-SetDrvrAuthMode(tcpsrv_t *pThis, uchar *mode)
+SetDrvrAuthMode(tcpsrv_t *pThis, uchar *const mode)
 {
 	DEFiRet;
 	ISOBJ_TYPE_assert(pThis, tcpsrv);
@@ -1425,7 +1385,9 @@ SetDrvrPermitExpiredCerts(tcpsrv_t *pThis, uchar *mode)
 {
 	DEFiRet;
 	ISOBJ_TYPE_assert(pThis, tcpsrv);
-	CHKmalloc(pThis->pszDrvrPermitExpiredCerts = ustrdup(mode));
+	if (mode != NULL) {
+		CHKmalloc(pThis->pszDrvrPermitExpiredCerts = ustrdup(mode));
+	}
 finalize_it:
 	RETiRet;
 }
@@ -1554,7 +1516,6 @@ CODESTARTobjQueryInterface(tcpsrv)
 	pIf->SetKeepAliveProbes = SetKeepAliveProbes;
 	pIf->SetKeepAliveTime = SetKeepAliveTime;
 	pIf->SetGnutlsPriorityString = SetGnutlsPriorityString;
-	pIf->SetLstnPortFileName = SetLstnPortFileName;
 	pIf->SetUsrP = SetUsrP;
 	pIf->SetInputName = SetInputName;
 	pIf->SetOrigin = SetOrigin;
@@ -1583,7 +1544,6 @@ CODESTARTobjQueryInterface(tcpsrv)
 	pIf->SetCBOnRegularClose = SetCBOnRegularClose;
 	pIf->SetCBOnErrClose = SetCBOnErrClose;
 	pIf->SetOnMsgReceive = SetOnMsgReceive;
-	pIf->SetRuleset = SetRuleset;
 	pIf->SetLinuxLikeRatelimiters = SetLinuxLikeRatelimiters;
 	pIf->SetNotificationOnRemoteClose = SetNotificationOnRemoteClose;
 	pIf->SetPreserveCase = SetPreserveCase;
@@ -1740,6 +1700,3 @@ CODESTARTmodInit
 	CHKiRet(tcps_sessClassInit(pModInfo));
 	CHKiRet(tcpsrvClassInit(pModInfo)); /* must be done after tcps_sess, as we use it */
 ENDmodInit
-
-/* vim:set ai:
- */

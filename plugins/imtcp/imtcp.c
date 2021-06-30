@@ -4,7 +4,7 @@
  * File begun on 2007-12-21 by RGerhards (extracted from syslogd.c,
  * which at the time of the rsyslog fork was BSD-licensed)
  *
- * Copyright 2007-2017 Adiscon GmbH.
+ * Copyright 2007-2021 Adiscon GmbH.
  *
  * This file is part of rsyslog.
  *
@@ -46,6 +46,7 @@
 #include <ctype.h>
 #include <netinet/in.h>
 #include <netdb.h>
+#include <signal.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #if HAVE_FCNTL_H
@@ -80,7 +81,14 @@ DEFobjCurrIf(ruleset)
 static rsRetVal resetConfigVariables(uchar __attribute__((unused)) *pp, void __attribute__((unused)) *pVal);
 
 /* Module static data */
-static tcpsrv_t *pOurTcpsrv = NULL;  /* our TCP server(listener) TODO: change for multiple instances */
+typedef struct tcpsrv_etry_s {
+	tcpsrv_t *tcpsrv;
+	pthread_t tid;	/* the worker's thread ID */
+	struct tcpsrv_etry_s *next;
+} tcpsrv_etry_t;
+static tcpsrv_etry_t *tcpsrv_root = NULL;
+static int n_tcpsrv = 0;
+
 static permittedPeers_t *pPermPeersRoot = NULL;
 
 #define FRAMING_UNSET -1
@@ -112,9 +120,9 @@ static struct configSettings_s {
 } cs;
 
 struct instanceConf_s {
-	uchar *pszBindPort;		/* port to bind to */
-	uchar *pszLstnPortFileName;	/* file dynamic port is written to */
-	uchar *pszBindAddr;             /* IP to bind socket to */
+	int iTCPSessMax;
+	int iTCPLstnMax;
+	tcpLstnParams_t *cnf_params;	/**< listener config parameters */
 	uchar *pszBindRuleset;		/* name of ruleset to bind to */
 	ruleset_t *pBindRuleset;	/* ruleset to bind listener to (use system default if unspecified) */
 	uchar *pszInputName;		/* value for inputname property, NULL is OK and handled by core engine */
@@ -122,7 +130,25 @@ struct instanceConf_s {
 	sbool bSPFramingFix;
 	unsigned int ratelimitInterval;
 	unsigned int ratelimitBurst;
-	int bSuppOctetFram;
+	int iAddtlFrameDelim; /* addtl frame delimiter, e.g. for netscreen, default none */
+	int maxFrameSize;
+	int bUseFlowControl;
+	int bDisableLFDelim;
+	int discardTruncatedMsg;
+	int bEmitMsgOnClose;
+	int bPreserveCase;
+	uchar *pszStrmDrvrName; /* stream driver to use */
+	int iStrmDrvrMode;
+	uchar *pszStrmDrvrAuthMode;
+	uchar *pszStrmDrvrPermitExpiredCerts;
+	uchar *gnutlsPriorityString;
+	int iStrmDrvrExtendedCertCheck;
+	int iStrmDrvrSANPreference;
+	int iStrmTlsVerifyDepth;
+	int bKeepAlive;
+	int iKeepAliveIntvl;
+	int iKeepAliveProbes;
+	int iKeepAliveTime;
 	struct instanceConf_s *next;
 };
 
@@ -180,9 +206,9 @@ static struct cnfparamdescr modpdescr[] = {
 	{ "streamdriver.TlsVerifyDepth", eCmdHdlrPositiveInt, 0 },
 	{ "permittedpeer", eCmdHdlrArray, 0 },
 	{ "keepalive", eCmdHdlrBinary, 0 },
-	{ "keepalive.probes", eCmdHdlrPositiveInt, 0 },
-	{ "keepalive.time", eCmdHdlrPositiveInt, 0 },
-	{ "keepalive.interval", eCmdHdlrPositiveInt, 0 },
+	{ "keepalive.probes", eCmdHdlrNonNegInt, 0 },
+	{ "keepalive.time", eCmdHdlrNonNegInt, 0 },
+	{ "keepalive.interval", eCmdHdlrNonNegInt, 0 },
 	{ "gnutlsprioritystring", eCmdHdlrString, 0 },
 	{ "preservecase", eCmdHdlrBinary, 0 }
 };
@@ -195,11 +221,32 @@ static struct cnfparamblk modpblk =
 /* input instance parameters */
 static struct cnfparamdescr inppdescr[] = {
 	{ "port", eCmdHdlrString, CNFPARAM_REQUIRED }, /* legacy: InputTCPServerRun */
+	{ "maxsessions", eCmdHdlrPositiveInt, 0 },
+	{ "maxlisteners", eCmdHdlrPositiveInt, 0 },
+	{ "flowcontrol", eCmdHdlrBinary, 0 },
+	{ "disablelfdelimiter", eCmdHdlrBinary, 0 },
+	{ "discardtruncatedmsg", eCmdHdlrBinary, 0 },
+	{ "notifyonconnectionclose", eCmdHdlrBinary, 0 },
+	{ "addtlframedelimiter", eCmdHdlrNonNegInt, 0 },
+	{ "maxframesize", eCmdHdlrInt, 0 },
+	{ "preservecase", eCmdHdlrBinary, 0 },
 	{ "listenportfilename", eCmdHdlrString, 0 },
 	{ "address", eCmdHdlrString, 0 },
 	{ "name", eCmdHdlrString, 0 },
 	{ "defaulttz", eCmdHdlrString, 0 },
 	{ "ruleset", eCmdHdlrString, 0 },
+	{ "streamdriver.mode", eCmdHdlrNonNegInt, 0 },
+	{ "streamdriver.authmode", eCmdHdlrString, 0 },
+	{ "streamdriver.permitexpiredcerts", eCmdHdlrString, 0 },
+	{ "streamdriver.name", eCmdHdlrString, 0 },
+	{ "streamdriver.CheckExtendedKeyPurpose", eCmdHdlrBinary, 0 },
+	{ "streamdriver.PrioritizeSAN", eCmdHdlrBinary, 0 },
+	{ "streamdriver.TlsVerifyDepth", eCmdHdlrPositiveInt, 0 },
+	{ "gnutlsprioritystring", eCmdHdlrString, 0 },
+	{ "keepalive", eCmdHdlrBinary, 0 },
+	{ "keepalive.probes", eCmdHdlrNonNegInt, 0 },
+	{ "keepalive.time", eCmdHdlrNonNegInt, 0 },
+	{ "keepalive.interval", eCmdHdlrNonNegInt, 0 },
 	{ "supportoctetcountedframing", eCmdHdlrBinary, 0 },
 	{ "ratelimit.interval", eCmdHdlrInt, 0 },
 	{ "framingfix.cisco.asa", eCmdHdlrBinary, 0 },
@@ -288,19 +335,43 @@ finalize_it:
 static rsRetVal
 createInstance(instanceConf_t **pinst)
 {
-	instanceConf_t *inst;
+	instanceConf_t *inst = NULL;
+
 	DEFiRet;
 	CHKmalloc(inst = malloc(sizeof(instanceConf_t)));
+	CHKmalloc(inst->cnf_params = (tcpLstnParams_t*) calloc(1, sizeof(tcpLstnParams_t)));
 	inst->next = NULL;
 	inst->pszBindRuleset = NULL;
 	inst->pszInputName = NULL;
-	inst->pszBindAddr = NULL;
 	inst->dfltTZ = NULL;
-	inst->bSuppOctetFram = -1; /* unset */
+	inst->cnf_params->bSuppOctetFram = -1; /* unset */
 	inst->bSPFramingFix = 0;
 	inst->ratelimitInterval = 0;
 	inst->ratelimitBurst = 10000;
-	inst->pszLstnPortFileName = NULL;
+
+	inst->pszStrmDrvrName = NULL;
+	inst->pszStrmDrvrAuthMode = NULL;
+	inst->pszStrmDrvrPermitExpiredCerts = NULL;
+	inst->gnutlsPriorityString = NULL;
+	inst->iStrmDrvrMode = loadModConf->iStrmDrvrMode;
+	inst->iStrmDrvrExtendedCertCheck = loadModConf->iStrmDrvrExtendedCertCheck;
+	inst->iStrmDrvrSANPreference = loadModConf->iStrmDrvrSANPreference;
+	inst->iStrmTlsVerifyDepth = loadModConf->iStrmTlsVerifyDepth;
+	inst->bKeepAlive = loadModConf->bKeepAlive;
+	inst->iKeepAliveIntvl = loadModConf->iKeepAliveIntvl;
+	inst->iKeepAliveProbes = loadModConf->iKeepAliveProbes;
+	inst->iKeepAliveTime = loadModConf->iKeepAliveTime;
+	inst->iAddtlFrameDelim = loadModConf->iAddtlFrameDelim;
+	inst->maxFrameSize = loadModConf->maxFrameSize;
+	inst->bUseFlowControl = loadModConf->bUseFlowControl;
+	inst->bDisableLFDelim = loadModConf->bDisableLFDelim;
+	inst->discardTruncatedMsg = loadModConf->discardTruncatedMsg;
+	inst->bEmitMsgOnClose = loadModConf->bEmitMsgOnClose;
+	inst->bPreserveCase = loadModConf->bPreserveCase;
+	inst->iTCPLstnMax = loadModConf->iTCPLstnMax;
+	inst->iTCPSessMax = loadModConf->iTCPSessMax;
+
+	inst->cnf_params->pszLstnPortFileName = NULL;
 
 	/* node created, let's add to config */
 	if(loadModConf->tail == NULL) {
@@ -312,6 +383,9 @@ createInstance(instanceConf_t **pinst)
 
 	*pinst = inst;
 finalize_it:
+	if(iRet != RS_RET_OK) {
+		free(inst);
+	}
 	RETiRet;
 }
 
@@ -328,7 +402,7 @@ static rsRetVal addInstance(void __attribute__((unused)) *pVal, uchar *pNewVal)
 
 	CHKiRet(createInstance(&inst));
 
-	CHKmalloc(inst->pszBindPort = ustrdup((pNewVal == NULL || *pNewVal == '\0')
+	CHKmalloc(inst->cnf_params->pszPort = ustrdup((pNewVal == NULL || *pNewVal == '\0')
 				 	       ? (uchar*) "10514" : pNewVal));
 	if((cs.pszBindRuleset == NULL) || (cs.pszBindRuleset[0] == '\0')) {
 		inst->pszBindRuleset = NULL;
@@ -336,14 +410,14 @@ static rsRetVal addInstance(void __attribute__((unused)) *pVal, uchar *pNewVal)
 		CHKmalloc(inst->pszBindRuleset = ustrdup(cs.pszBindRuleset));
 	}
 	if((cs.lstnIP == NULL) || (cs.lstnIP[0] == '\0')) {
-		inst->pszBindAddr = NULL;
+		inst->cnf_params->pszAddr = NULL;
 	} else {
-		CHKmalloc(inst->pszBindAddr = ustrdup(cs.lstnIP));
+		CHKmalloc(inst->cnf_params->pszAddr = ustrdup(cs.lstnIP));
 	}
 	if((cs.lstnPortFile == NULL) || (cs.lstnPortFile[0] == '\0')) {
-		inst->pszBindAddr = NULL;
+		inst->cnf_params->pszAddr = NULL;
 	} else {
-		CHKmalloc(inst->pszLstnPortFileName = ustrdup(cs.lstnPortFile));
+		CHKmalloc(inst->cnf_params->pszLstnPortFileName = ustrdup(cs.lstnPortFile));
 	}
 
 	if((cs.pszInputName == NULL) || (cs.pszInputName[0] == '\0')) {
@@ -351,7 +425,7 @@ static rsRetVal addInstance(void __attribute__((unused)) *pVal, uchar *pNewVal)
 	} else {
 		CHKmalloc(inst->pszInputName = ustrdup(cs.pszInputName));
 	}
-	inst->bSuppOctetFram = cs.bSuppOctetFram;
+	inst->cnf_params->bSuppOctetFram = cs.bSuppOctetFram;
 
 finalize_it:
 	free(pNewVal);
@@ -363,65 +437,78 @@ static rsRetVal
 addListner(modConfData_t *modConf, instanceConf_t *inst)
 {
 	DEFiRet;
+	uchar *psz;	/* work variable */
 
-	if(pOurTcpsrv == NULL) {
-		CHKiRet(tcpsrv.Construct(&pOurTcpsrv));
-		/* callbacks */
-		CHKiRet(tcpsrv.SetCBIsPermittedHost(pOurTcpsrv, isPermittedHost));
-		CHKiRet(tcpsrv.SetCBRcvData(pOurTcpsrv, doRcvData));
-		CHKiRet(tcpsrv.SetCBOpenLstnSocks(pOurTcpsrv, doOpenLstnSocks));
-		CHKiRet(tcpsrv.SetCBOnRegularClose(pOurTcpsrv, onRegularClose));
-		CHKiRet(tcpsrv.SetCBOnErrClose(pOurTcpsrv, onErrClose));
-		/* params */
-		CHKiRet(tcpsrv.SetKeepAlive(pOurTcpsrv, modConf->bKeepAlive));
-		CHKiRet(tcpsrv.SetKeepAliveIntvl(pOurTcpsrv, modConf->iKeepAliveIntvl));
-		CHKiRet(tcpsrv.SetKeepAliveProbes(pOurTcpsrv, modConf->iKeepAliveProbes));
-		CHKiRet(tcpsrv.SetKeepAliveTime(pOurTcpsrv, modConf->iKeepAliveTime));
-		CHKiRet(tcpsrv.SetGnutlsPriorityString(pOurTcpsrv, modConf->gnutlsPriorityString));
-		CHKiRet(tcpsrv.SetSessMax(pOurTcpsrv, modConf->iTCPSessMax));
-		CHKiRet(tcpsrv.SetLstnMax(pOurTcpsrv, modConf->iTCPLstnMax));
-		CHKiRet(tcpsrv.SetDrvrMode(pOurTcpsrv, modConf->iStrmDrvrMode));
-		CHKiRet(tcpsrv.SetDrvrCheckExtendedKeyUsage(pOurTcpsrv, modConf->iStrmDrvrExtendedCertCheck));
-		CHKiRet(tcpsrv.SetDrvrPrioritizeSAN(pOurTcpsrv, modConf->iStrmDrvrSANPreference));
-		CHKiRet(tcpsrv.SetDrvrTlsVerifyDepth(pOurTcpsrv, modConf->iStrmTlsVerifyDepth));
-		CHKiRet(tcpsrv.SetUseFlowControl(pOurTcpsrv, modConf->bUseFlowControl));
-		CHKiRet(tcpsrv.SetAddtlFrameDelim(pOurTcpsrv, modConf->iAddtlFrameDelim));
-		CHKiRet(tcpsrv.SetMaxFrameSize(pOurTcpsrv, modConf->maxFrameSize));
-		CHKiRet(tcpsrv.SetbDisableLFDelim(pOurTcpsrv, modConf->bDisableLFDelim));
-		CHKiRet(tcpsrv.SetDiscardTruncatedMsg(pOurTcpsrv, modConf->discardTruncatedMsg));
-		CHKiRet(tcpsrv.SetNotificationOnRemoteClose(pOurTcpsrv, modConf->bEmitMsgOnClose));
-		/* now set optional params, but only if they were actually configured */
-		if(modConf->pszStrmDrvrName != NULL) {
-			CHKiRet(tcpsrv.SetDrvrName(pOurTcpsrv, modConf->pszStrmDrvrName));
-		}
-		if(modConf->pszStrmDrvrAuthMode != NULL) {
-			CHKiRet(tcpsrv.SetDrvrAuthMode(pOurTcpsrv, modConf->pszStrmDrvrAuthMode));
-		}
-		if(modConf->pszStrmDrvrPermitExpiredCerts != NULL) {
-			CHKiRet(tcpsrv.SetDrvrPermitExpiredCerts(pOurTcpsrv, modConf->pszStrmDrvrPermitExpiredCerts));
-		}
-		if(pPermPeersRoot != NULL) {
-			CHKiRet(tcpsrv.SetDrvrPermPeers(pOurTcpsrv, pPermPeersRoot));
-		}
-		CHKiRet(tcpsrv.SetPreserveCase(pOurTcpsrv, modConf->bPreserveCase));
+	tcpsrv_t *pOurTcpsrv;
+	CHKiRet(tcpsrv.Construct(&pOurTcpsrv));
+	/* callbacks */
+	CHKiRet(tcpsrv.SetCBIsPermittedHost(pOurTcpsrv, isPermittedHost));
+	CHKiRet(tcpsrv.SetCBRcvData(pOurTcpsrv, doRcvData));
+	CHKiRet(tcpsrv.SetCBOpenLstnSocks(pOurTcpsrv, doOpenLstnSocks));
+	CHKiRet(tcpsrv.SetCBOnRegularClose(pOurTcpsrv, onRegularClose));
+	CHKiRet(tcpsrv.SetCBOnErrClose(pOurTcpsrv, onErrClose));
+	/* params */
+	CHKiRet(tcpsrv.SetKeepAlive(pOurTcpsrv, inst->bKeepAlive));
+	CHKiRet(tcpsrv.SetKeepAliveIntvl(pOurTcpsrv, inst->iKeepAliveIntvl));
+	CHKiRet(tcpsrv.SetKeepAliveProbes(pOurTcpsrv, inst->iKeepAliveProbes));
+	CHKiRet(tcpsrv.SetKeepAliveTime(pOurTcpsrv, inst->iKeepAliveTime));
+	CHKiRet(tcpsrv.SetSessMax(pOurTcpsrv, inst->iTCPSessMax));
+	CHKiRet(tcpsrv.SetLstnMax(pOurTcpsrv, inst->iTCPLstnMax));
+	CHKiRet(tcpsrv.SetDrvrMode(pOurTcpsrv, inst->iStrmDrvrMode));
+	CHKiRet(tcpsrv.SetDrvrCheckExtendedKeyUsage(pOurTcpsrv, inst->iStrmDrvrExtendedCertCheck));
+	CHKiRet(tcpsrv.SetDrvrPrioritizeSAN(pOurTcpsrv, inst->iStrmDrvrSANPreference));
+	CHKiRet(tcpsrv.SetDrvrTlsVerifyDepth(pOurTcpsrv, inst->iStrmTlsVerifyDepth));
+	CHKiRet(tcpsrv.SetUseFlowControl(pOurTcpsrv, inst->bUseFlowControl));
+	CHKiRet(tcpsrv.SetAddtlFrameDelim(pOurTcpsrv, inst->iAddtlFrameDelim));
+	CHKiRet(tcpsrv.SetMaxFrameSize(pOurTcpsrv, inst->maxFrameSize));
+	CHKiRet(tcpsrv.SetbDisableLFDelim(pOurTcpsrv, inst->bDisableLFDelim));
+	CHKiRet(tcpsrv.SetDiscardTruncatedMsg(pOurTcpsrv, inst->discardTruncatedMsg));
+	CHKiRet(tcpsrv.SetNotificationOnRemoteClose(pOurTcpsrv, inst->bEmitMsgOnClose));
+	CHKiRet(tcpsrv.SetPreserveCase(pOurTcpsrv, inst->bPreserveCase));
+	/* now set optional params, but only if they were actually configured */
+	psz = (inst->pszStrmDrvrName == NULL) ? modConf->pszStrmDrvrName : inst->pszStrmDrvrName;
+	if(psz != NULL) {
+		CHKiRet(tcpsrv.SetDrvrName(pOurTcpsrv, psz));
+	}
+	psz = (inst->pszStrmDrvrAuthMode == NULL) ? modConf->pszStrmDrvrAuthMode : inst->pszStrmDrvrAuthMode;
+	if(psz != NULL) {
+		CHKiRet(tcpsrv.SetDrvrAuthMode(pOurTcpsrv, psz));
+	}
+	psz = (inst->gnutlsPriorityString == NULL)
+			? modConf->gnutlsPriorityString : inst->gnutlsPriorityString;
+	CHKiRet(tcpsrv.SetGnutlsPriorityString(pOurTcpsrv, psz));
+	/* Call SetDrvrPermitExpiredCerts required
+	 * when param is NULL default handling for ExpiredCerts is set! */
+	psz = (inst->pszStrmDrvrPermitExpiredCerts == NULL)
+			? modConf->pszStrmDrvrPermitExpiredCerts : inst->pszStrmDrvrPermitExpiredCerts;
+	CHKiRet(tcpsrv.SetDrvrPermitExpiredCerts(pOurTcpsrv, psz));
+	if(pPermPeersRoot != NULL) {
+		CHKiRet(tcpsrv.SetDrvrPermPeers(pOurTcpsrv, pPermPeersRoot));
 	}
 
 	/* initialized, now add socket and listener params */
-	DBGPRINTF("imtcp: trying to add port *:%s\n", inst->pszBindPort);
-	CHKiRet(tcpsrv.SetRuleset(pOurTcpsrv, inst->pBindRuleset));
-	CHKiRet(tcpsrv.SetInputName(pOurTcpsrv, inst->pszInputName == NULL ?
+	DBGPRINTF("imtcp: trying to add port *:%s\n", inst->cnf_params->pszPort);
+	inst->cnf_params->pRuleset = inst->pBindRuleset;
+	CHKiRet(tcpsrv.SetInputName(pOurTcpsrv, inst->cnf_params, inst->pszInputName == NULL ?
 						UCHAR_CONSTANT("imtcp") : inst->pszInputName));
 	CHKiRet(tcpsrv.SetOrigin(pOurTcpsrv, (uchar*)"imtcp"));
 	CHKiRet(tcpsrv.SetDfltTZ(pOurTcpsrv, (inst->dfltTZ == NULL) ? (uchar*)"" : inst->dfltTZ));
 	CHKiRet(tcpsrv.SetbSPFramingFix(pOurTcpsrv, inst->bSPFramingFix));
 	CHKiRet(tcpsrv.SetLinuxLikeRatelimiters(pOurTcpsrv, inst->ratelimitInterval, inst->ratelimitBurst));
 
-	if((ustrcmp(inst->pszBindPort, UCHAR_CONSTANT("0")) == 0 && inst->pszLstnPortFileName == NULL)
-			|| ustrcmp(inst->pszBindPort, UCHAR_CONSTANT("0")) < 0) {
-		CHKmalloc(inst->pszBindPort = (uchar*)strdup("514"));
+	if((ustrcmp(inst->cnf_params->pszPort, UCHAR_CONSTANT("0")) == 0
+		&& inst->cnf_params->pszLstnPortFileName == NULL)
+			|| ustrcmp(inst->cnf_params->pszPort, UCHAR_CONSTANT("0")) < 0) {
+		CHKmalloc(inst->cnf_params->pszPort = (uchar*)strdup("514"));
 	}
-	tcpsrv.configureTCPListen(pOurTcpsrv, inst->pszBindPort, inst->bSuppOctetFram,
-		inst->pszBindAddr, inst->pszLstnPortFileName);
+	tcpsrv.configureTCPListen(pOurTcpsrv, inst->cnf_params);
+
+	tcpsrv_etry_t *etry;
+	CHKmalloc(etry = (tcpsrv_etry_t*) calloc(1, sizeof(tcpsrv_etry_t)));
+	etry->tcpsrv = pOurTcpsrv;
+	etry->next = tcpsrv_root;
+	tcpsrv_root = etry;
+	++n_tcpsrv;
 
 finalize_it:
 	if(iRet != RS_RET_OK) {
@@ -456,9 +543,9 @@ CODESTARTnewInpInst
 		if(!pvals[i].bUsed)
 			continue;
 		if(!strcmp(inppblk.descr[i].name, "port")) {
-			inst->pszBindPort = (uchar*)es_str2cstr(pvals[i].val.d.estr, NULL);
+			inst->cnf_params->pszPort = (uchar*)es_str2cstr(pvals[i].val.d.estr, NULL);
 		} else if(!strcmp(inppblk.descr[i].name, "address")) {
-			inst->pszBindAddr = (uchar*)es_str2cstr(pvals[i].val.d.estr, NULL);
+			inst->cnf_params->pszAddr = (uchar*)es_str2cstr(pvals[i].val.d.estr, NULL);
 		} else if(!strcmp(inppblk.descr[i].name, "name")) {
 			inst->pszInputName = (uchar*)es_str2cstr(pvals[i].val.d.estr, NULL);
 		} else if(!strcmp(inppblk.descr[i].name, "defaulttz")) {
@@ -467,14 +554,68 @@ CODESTARTnewInpInst
 			inst->bSPFramingFix = (int) pvals[i].val.d.n;
 		} else if(!strcmp(inppblk.descr[i].name, "ruleset")) {
 			inst->pszBindRuleset = (uchar*)es_str2cstr(pvals[i].val.d.estr, NULL);
+		} else if(!strcmp(inppblk.descr[i].name, "streamdriver.mode")) {
+			inst->iStrmDrvrMode = (int) pvals[i].val.d.n;
+		} else if(!strcmp(inppblk.descr[i].name, "streamdriver.CheckExtendedKeyPurpose")) {
+			inst->iStrmDrvrExtendedCertCheck = (int) pvals[i].val.d.n;
+		} else if(!strcmp(inppblk.descr[i].name, "streamdriver.PrioritizeSAN")) {
+			inst->iStrmDrvrSANPreference = (int) pvals[i].val.d.n;
+		} else if(!strcmp(inppblk.descr[i].name, "streamdriver.TlsVerifyDepth")) {
+			if (pvals[i].val.d.n >= 2) {
+				inst->iStrmTlsVerifyDepth = (int) pvals[i].val.d.n;
+			} else {
+				parser_errmsg("streamdriver.TlsVerifyDepth must be 2 or higher but is %d",
+									(int) pvals[i].val.d.n);
+			}
+		} else if(!strcmp(inppblk.descr[i].name, "streamdriver.authmode")) {
+			inst->pszStrmDrvrAuthMode = (uchar*)es_str2cstr(pvals[i].val.d.estr, NULL);
+		} else if(!strcmp(inppblk.descr[i].name, "streamdriver.permitexpiredcerts")) {
+			inst->pszStrmDrvrPermitExpiredCerts = (uchar*)es_str2cstr(pvals[i].val.d.estr, NULL);
+		} else if(!strcmp(inppblk.descr[i].name, "streamdriver.name")) {
+			inst->pszStrmDrvrName = (uchar*)es_str2cstr(pvals[i].val.d.estr, NULL);
+		} else if(!strcmp(inppblk.descr[i].name, "gnutlsprioritystring")) {
+			inst->gnutlsPriorityString = (uchar*)es_str2cstr(pvals[i].val.d.estr, NULL);
+		} else if(!strcmp(inppblk.descr[i].name, "flowcontrol")) {
+			inst->bUseFlowControl = (int) pvals[i].val.d.n;
+		} else if(!strcmp(inppblk.descr[i].name, "disablelfdelimiter")) {
+			inst->bDisableLFDelim = (int) pvals[i].val.d.n;
+		} else if(!strcmp(inppblk.descr[i].name, "discardtruncatedmsg")) {
+			inst->discardTruncatedMsg = (int) pvals[i].val.d.n;
+		} else if(!strcmp(inppblk.descr[i].name, "notifyonconnectionclose")) {
+			inst->bEmitMsgOnClose = (int) pvals[i].val.d.n;
+		} else if(!strcmp(inppblk.descr[i].name, "addtlframedelimiter")) {
+			inst->iAddtlFrameDelim = (int) pvals[i].val.d.n;
+		} else if(!strcmp(inppblk.descr[i].name, "maxframesize")) {
+			const int max = (int) pvals[i].val.d.n;
+			if(max <= 200000000) {
+				inst->maxFrameSize = max;
+			} else {
+				LogError(0, RS_RET_PARAM_ERROR, "imtcp: invalid value for 'maxFrameSize' "
+						"parameter given is %d, max is 200000000", max);
+				ABORT_FINALIZE(RS_RET_PARAM_ERROR);
+			}
+		} else if(!strcmp(inppblk.descr[i].name, "maxsessions")) {
+			inst->iTCPSessMax = (int) pvals[i].val.d.n;
+		} else if(!strcmp(inppblk.descr[i].name, "maxlisteners")) {
+			inst->iTCPLstnMax = (int) pvals[i].val.d.n;
 		} else if(!strcmp(inppblk.descr[i].name, "supportoctetcountedframing")) {
-			inst->bSuppOctetFram = (int) pvals[i].val.d.n;
+			inst->cnf_params->bSuppOctetFram = (int) pvals[i].val.d.n;
+		} else if(!strcmp(inppblk.descr[i].name, "keepalive")) {
+			inst->bKeepAlive = (int) pvals[i].val.d.n;
+		} else if(!strcmp(inppblk.descr[i].name, "keepalive.probes")) {
+			inst->iKeepAliveProbes = (int) pvals[i].val.d.n;
+		} else if(!strcmp(inppblk.descr[i].name, "keepalive.time")) {
+			inst->iKeepAliveTime = (int) pvals[i].val.d.n;
+		} else if(!strcmp(inppblk.descr[i].name, "keepalive.interval")) {
+			inst->iKeepAliveIntvl = (int) pvals[i].val.d.n;
 		} else if(!strcmp(inppblk.descr[i].name, "ratelimit.burst")) {
 			inst->ratelimitBurst = (unsigned int) pvals[i].val.d.n;
 		} else if(!strcmp(inppblk.descr[i].name, "ratelimit.interval")) {
 			inst->ratelimitInterval = (unsigned int) pvals[i].val.d.n;
+		} else if(!strcmp(inppblk.descr[i].name, "preservecase")) {
+			inst->bPreserveCase = (int) pvals[i].val.d.n;
 		} else if(!strcmp(inppblk.descr[i].name, "listenportfilename")) {
-			inst->pszLstnPortFileName = (uchar*)es_str2cstr(pvals[i].val.d.estr, NULL);
+			inst->cnf_params->pszLstnPortFileName = (uchar*)es_str2cstr(pvals[i].val.d.estr, NULL);
 		} else {
 			dbgprintf("imtcp: program error, non-handled "
 			  "param '%s'\n", inppblk.descr[i].name);
@@ -656,7 +797,7 @@ std_checkRuleset_genErrMsg(__attribute__((unused)) modConfData_t *modConf, insta
 {
 	LogError(0, NO_ERRCODE, "imtcp: ruleset '%s' for port %s not found - "
 			"using default ruleset instead", inst->pszBindRuleset,
-			inst->pszBindPort);
+			inst->cnf_params->pszPort);
 }
 
 BEGINcheckCnf
@@ -664,8 +805,8 @@ BEGINcheckCnf
 CODESTARTcheckCnf
 	for(inst = pModConf->root ; inst != NULL ; inst = inst->next) {
 		std_checkRuleset(pModConf, inst);
-		if(inst->bSuppOctetFram == FRAMING_UNSET)
-			inst->bSuppOctetFram = pModConf->bSuppOctetFram;
+		if(inst->cnf_params->bSuppOctetFram == FRAMING_UNSET)
+			inst->cnf_params->bSuppOctetFram = pModConf->bSuppOctetFram;
 	}
 	if(pModConf->root == NULL) {
 		LogError(0, RS_RET_NO_LISTNERS , "imtcp: module loaded, but "
@@ -689,9 +830,13 @@ CODESTARTactivateCnfPrePrivDrop
 	for(inst = runModConf->root ; inst != NULL ; inst = inst->next) {
 		addListner(runModConf, inst);
 	}
-	if(pOurTcpsrv == NULL)
+	if(tcpsrv_root == NULL)
 		ABORT_FINALIZE(RS_RET_NO_RUN);
-	iRet = tcpsrv.ConstructFinalize(pOurTcpsrv);
+	tcpsrv_etry_t *etry = tcpsrv_root;
+	while(etry != NULL) {
+		CHKiRet(tcpsrv.ConstructFinalize(etry->tcpsrv));
+		etry = etry->next;
+	}
 finalize_it:
 ENDactivateCnfPrePrivDrop
 
@@ -713,23 +858,93 @@ CODESTARTfreeCnf
 		free(pModConf->permittedPeers);
 	}
 	for(inst = pModConf->root ; inst != NULL ; ) {
-		free(inst->pszBindPort);
-		free(inst->pszLstnPortFileName);
-		free(inst->pszBindAddr);
-		free(inst->pszBindRuleset);
-		free(inst->pszInputName);
-		free(inst->dfltTZ);
+		free((void*)inst->pszBindRuleset);
+		free((void*)inst->pszStrmDrvrAuthMode);
+		free((void*)inst->pszStrmDrvrName);
+		free((void*)inst->pszStrmDrvrPermitExpiredCerts);
+		free((void*)inst->gnutlsPriorityString);
+		free((void*)inst->pszInputName);
+		free((void*)inst->dfltTZ);
 		del = inst;
 		inst = inst->next;
 		free(del);
 	}
 ENDfreeCnf
 
+static void *
+RunServerThread(void *myself)
+{
+	tcpsrv_etry_t *const etry = (tcpsrv_etry_t*) myself;
+	rsRetVal iRet;
+	dbgprintf("RGER: running ety %p\n", etry);
+	iRet = tcpsrv.Run(etry->tcpsrv);
+	if(iRet != RS_RET_OK) {
+		LogError(0, iRet, "imtcp: error while terminating server; rsyslog may hang on shutdown");
+	}
+	return NULL;
+}
+
+
+/* support for running multiple servers on multiple threads (one server per thread) */
+static void
+startSrvWrkr(tcpsrv_etry_t *const etry)
+{
+	int r;
+	pthread_attr_t sessThrdAttr;
+
+	/* We need to temporarily block all signals because the new thread
+	 * inherits our signal mask. There is a race if we do not block them
+	 * now, and we have seen in practice that this race causes grief.
+	 * So we 1. save the current set, 2. block evertyhing, 3. start
+	 * threads, and 4 reset the current set to saved state.
+	 * rgerhards, 2019-08-16
+	 */
+	sigset_t sigSet, sigSetSave;
+	sigfillset(&sigSet);
+	/* enable signals we still need */
+	sigdelset(&sigSet, SIGTTIN);
+	sigdelset(&sigSet, SIGSEGV);
+	pthread_sigmask(SIG_SETMASK, &sigSet, &sigSetSave);
+
+	pthread_attr_init(&sessThrdAttr);
+	pthread_attr_setstacksize(&sessThrdAttr, 4096*1024);
+	r = pthread_create(&etry->tid, &sessThrdAttr, RunServerThread, etry);
+	if(r != 0) {
+		LogError(errno, NO_ERRCODE, "imtcp error creating server thread");
+		/* we do NOT abort, as other servers may run - after all, we logged an error */
+	}
+	pthread_attr_destroy(&sessThrdAttr);
+	pthread_sigmask(SIG_SETMASK, &sigSetSave, NULL);
+}
+
+/* stop server worker thread
+ */
+static void
+stopSrvWrkr(tcpsrv_etry_t *const etry)
+{
+	DBGPRINTF("Wait for thread shutdown etry %p\n", etry);
+	pthread_kill(etry->tid, SIGTTIN);
+	pthread_join(etry->tid, NULL);
+	DBGPRINTF("input %p terminated\n", etry);
+}
+
 /* This function is called to gather input.
  */
 BEGINrunInput
 CODESTARTrunInput
-	iRet = tcpsrv.Run(pOurTcpsrv);
+	tcpsrv_etry_t *etry = tcpsrv_root->next;
+	while(etry != NULL) {
+		startSrvWrkr(etry);
+		etry = etry->next;
+	}
+
+	iRet = tcpsrv.Run(tcpsrv_root->tcpsrv);
+
+	/* de-init remaining servers */
+	while(etry != NULL) {
+		stopSrvWrkr(etry);
+		etry = etry->next;
+	}
 ENDrunInput
 
 
@@ -742,8 +957,12 @@ ENDwillRun
 
 BEGINafterRun
 CODESTARTafterRun
-	if(pOurTcpsrv != NULL)
-		iRet = tcpsrv.Destruct(&pOurTcpsrv);
+	tcpsrv_etry_t *etry = tcpsrv_root;
+	while(etry != NULL) {
+		iRet = tcpsrv.Destruct(&etry->tcpsrv);
+		// TODO: check iRet, reprot error
+		etry = etry->next;
+	}
 
 	net.clearAllowedSenders(UCHAR_CONSTANT("TCP"));
 ENDafterRun
@@ -814,7 +1033,7 @@ BEGINmodInit()
 CODESTARTmodInit
 	*ipIFVersProvided = CURR_MOD_IF_VERSION; /* we only support the current interface specification */
 CODEmodInit_QueryRegCFSLineHdlr
-	pOurTcpsrv = NULL;
+	tcpsrv_root = NULL;
 	/* request objects we use */
 	CHKiRet(objUse(net, LM_NET_FILENAME));
 	CHKiRet(objUse(netstrm, LM_NETSTRMS_FILENAME));

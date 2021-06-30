@@ -1321,9 +1321,9 @@ gtlsEndSess(nsd_gtls_t *pThis)
 
 	if(pThis->bHaveSess) {
 		if(pThis->bIsInitiator) {
-			gnuRet = gnutls_bye(pThis->sess, GNUTLS_SHUT_RDWR);
+			gnuRet = gnutls_bye(pThis->sess, GNUTLS_SHUT_WR);
 			while(gnuRet == GNUTLS_E_INTERRUPTED || gnuRet == GNUTLS_E_AGAIN) {
-				gnuRet = gnutls_bye(pThis->sess, GNUTLS_SHUT_RDWR);
+				gnuRet = gnutls_bye(pThis->sess, GNUTLS_SHUT_WR);
 			}
 		}
 		gnutls_deinit(pThis->sess);
@@ -1442,7 +1442,7 @@ SetAuthMode(nsd_t *pNsd, uchar *mode)
 		ABORT_FINALIZE(RS_RET_VALUE_NOT_SUPPORTED);
 	}
 
-	dbgprintf("SetAuthMode to %s\n", mode);
+	dbgprintf("SetAuthMode to %s\n", (mode != NULL ? (char*)mode : "NULL"));
 /* TODO: clear stored IDs! */
 
 finalize_it:
@@ -1476,7 +1476,8 @@ SetPermitExpiredCerts(nsd_t *pNsd, uchar *mode)
 		ABORT_FINALIZE(RS_RET_VALUE_NOT_SUPPORTED);
 	}
 
-	dbgprintf("SetPermitExpiredCerts: Set Mode %s/%d\n", mode, pThis->permitExpiredCerts);
+	dbgprintf("SetPermitExpiredCerts: Set Mode %s/%d\n",
+		(mode != NULL ? (char*)mode : "NULL"), pThis->permitExpiredCerts);
 
 /* TODO: clear stored IDs! */
 
@@ -1521,7 +1522,8 @@ SetGnutlsPriorityString(nsd_t *pNsd, uchar *gnutlsPriorityString)
 
 	ISOBJ_TYPE_assert((pThis), nsd_gtls);
 	pThis->gnutlsPriorityString = gnutlsPriorityString;
-	dbgprintf("gnutlsPriorityString: set to '%s'\n", gnutlsPriorityString);
+	dbgprintf("gnutlsPriorityString: set to '%s'\n",
+		(gnutlsPriorityString != NULL ? (char*)gnutlsPriorityString : "NULL"));
 	RETiRet;
 }
 
@@ -1690,14 +1692,13 @@ Abort(nsd_t *pNsd)
  * a session, but not during listener setup.
  * gerhards, 2008-04-25
  */
-static rsRetVal
+static rsRetVal ATTR_NONNULL(1,3,5)
 LstnInit(netstrms_t *pNS, void *pUsr, rsRetVal(*fAddLstn)(void*,netstrm_t*),
-	 uchar *pLstnPort, uchar *pLstnIP, int iSessMax,
-	 uchar *pszLstnPortFileName)
+	 const int iSessMax, const tcpLstnParams_t *const cnf_params)
 {
 	DEFiRet;
 	CHKiRet(gtlsGlblInitLstn());
-	iRet = nsd_ptcp.LstnInit(pNS, pUsr, fAddLstn, pLstnPort, pLstnIP, iSessMax, pszLstnPortFileName);
+	iRet = nsd_ptcp.LstnInit(pNS, pUsr, fAddLstn, iSessMax, cnf_params);
 finalize_it:
 	RETiRet;
 }
@@ -1783,11 +1784,13 @@ AcceptConnReq(nsd_t *pNsd, nsd_t **ppNew)
 		FINALIZE;
 	}
 	/* copy Properties to pnew first */
+dbgprintf("RGER: pThis %p pNew %p, authMode %d\n", pThis, pNew, pThis->authMode);
 	pNew->authMode = pThis->authMode;
 	pNew->permitExpiredCerts = pThis->permitExpiredCerts;
 	pNew->pPermPeers = pThis->pPermPeers;
 	pNew->gnutlsPriorityString = pThis->gnutlsPriorityString;
 	pNew->DrvrVerifyDepth = pThis->DrvrVerifyDepth;
+	pNew->dataTypeCheck = pThis->dataTypeCheck;
 
 	/* if we reach this point, we are in TLS mode */
 	iRet = gtlsInitSession(pNew);

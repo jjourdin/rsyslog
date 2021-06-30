@@ -2,7 +2,7 @@
  *
  * Module begun 2011-04-19 by Rainer Gerhards
  *
- * Copyright 2011-2019 Adiscon GmbH.
+ * Copyright 2011-2020 Adiscon GmbH.
  *
  * This file is part of the rsyslog runtime library.
  *
@@ -90,6 +90,8 @@ static uchar template_DebugFormat[] = "\"Debug line with all properties:\nFROMHO
 "rawmsg: '%rawmsg%'\n$!:%$!%\n$.:%$.%\n$/:%$/%\n\n\"";
 static uchar template_SyslogProtocol23Format[] = "\"<%PRI%>1 %TIMESTAMP:::date-rfc3339% %HOSTNAME% %APP-NAME% "
 "%PROCID% %MSGID% %STRUCTURED-DATA% %msg%\n\"";
+static uchar template_SyslogRFC5424Format[] = "\"<%PRI%>1 %TIMESTAMP:::date-rfc3339% %HOSTNAME% %APP-NAME% "
+"%PROCID% %MSGID% %STRUCTURED-DATA% %msg%\"";
 static uchar template_TraditionalFileFormat[] = "=RSYSLOG_TraditionalFileFormat";
 static uchar template_FileFormat[] = "=RSYSLOG_FileFormat";
 static uchar template_ForwardFormat[] = "=RSYSLOG_ForwardFormat";
@@ -156,6 +158,7 @@ static void cnfSetDefaults(rsconf_t *pThis)
 	pThis->globals.maxErrMsgToStderr = -1;
 	pThis->globals.umask = -1;
 	pThis->globals.gidDropPrivKeepSupplemental = 0;
+	pThis->globals.abortOnIDResolutionFail = 1;
 	pThis->templates.root = NULL;
 	pThis->templates.last = NULL;
 	pThis->templates.lastStatic = NULL;
@@ -438,6 +441,16 @@ cnfDoObj(struct cnfobj *const o)
 
 	dbgprintf("cnf:global:obj: ");
 	cnfobjPrint(o);
+
+	/* We need to check for object disabling as early as here to cover most
+	 * of them at once and avoid needless initializations
+	 * - jvymazal 2020-02-12
+	 */
+	if (nvlstChkDisabled(o->nvlst)) {
+		dbgprintf("object disabled by configuration\n");
+		return;
+	}
+
 	switch(o->objType) {
 	case CNFOBJ_GLOBAL:
 		glblProcessCnf(o);
@@ -1235,6 +1248,8 @@ initLegacyConf(void)
 	tplAddLine(ourConf, "RSYSLOG_DebugFormat", &pTmp);
 	pTmp = template_SyslogProtocol23Format;
 	tplAddLine(ourConf, "RSYSLOG_SyslogProtocol23Format", &pTmp);
+	pTmp = template_SyslogRFC5424Format;
+	tplAddLine(ourConf, "RSYSLOG_SyslogRFC5424Format", &pTmp);
 	pTmp = template_FileFormat; /* new format for files with high-precision stamp */
 	tplAddLine(ourConf, "RSYSLOG_FileFormat", &pTmp);
 	pTmp = template_TraditionalFileFormat;

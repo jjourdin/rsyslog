@@ -119,6 +119,8 @@ typedef struct instanceConf_s {
 	uchar *httpheaderkey;
 	uchar *httpheadervalue;
 	uchar *headerBuf;
+	uchar **httpHeaders;
+	int nHttpHeaders;
 	uchar *restPath;
 	uchar *checkPath;
 	uchar *tplName;
@@ -169,9 +171,11 @@ typedef struct wrkrInstanceData {
 	sbool bzInitDone;
 	z_stream zstrm; /* zip stream to use for gzip http compression */
 	struct {
-		uchar **data; /* array of strings, this will be batched up lazily */
-		size_t sizeBytes; /* total length of this batch in bytes */
-		size_t nmemb;	/* number of messages in batch (for statistics counting) */
+		uchar **data;		/* array of strings, this will be batched up lazily */
+		uchar *restPath;	/* Helper for restpath in batch mode */
+		size_t sizeBytes;	/* total length of this batch in bytes */
+		size_t nmemb;		/* number of messages in batch (for statistics counting) */
+
 	} batch;
 	struct {
 		uchar *buf;
@@ -189,6 +193,7 @@ static struct cnfparamdescr actpdescr[] = {
 	{ "httpcontenttype", eCmdHdlrGetWord, 0 },
 	{ "httpheaderkey", eCmdHdlrGetWord, 0 },
 	{ "httpheadervalue", eCmdHdlrString, 0 },
+	{ "httpheaders", eCmdHdlrArray, 0 },
 	{ "uid", eCmdHdlrGetWord, 0 },
 	{ "pwd", eCmdHdlrGetWord, 0 },
 	{ "restpath", eCmdHdlrGetWord, 0 },
@@ -273,6 +278,7 @@ CODESTARTcreateWrkrInstance
 			pData->batchMode = 0; /* at least it works */
 		} else {
 			pWrkrData->batch.data = batchData;
+			pWrkrData->batch.restPath = NULL;
 		}
 	}
 	initCompressCtx(pWrkrData);
@@ -299,6 +305,11 @@ CODESTARTfreeInstance
 	free(pData->headerContentTypeBuf);
 	free(pData->httpheaderkey);
 	free(pData->httpheadervalue);
+	for(i = 0 ; i < pData->nHttpHeaders ; ++i) {
+		free((void*) pData->httpHeaders[i]);
+	}
+	free(pData->httpHeaders);
+	pData->nHttpHeaders = 0;
 	free(pData->pwd);
 	free(pData->authBuf);
 	free(pData->headerBuf);
@@ -326,6 +337,11 @@ CODESTARTfreeWrkrInstance
 	free(pWrkrData->batch.data);
 	pWrkrData->batch.data = NULL;
 
+	if (pWrkrData->batch.restPath != NULL)  {
+		free(pWrkrData->batch.restPath);
+		pWrkrData->batch.restPath = NULL;
+	}
+
 	if (pWrkrData->bzInitDone)
 		deflateEnd(&pWrkrData->zstrm);
 	freeCompressCtx(pWrkrData);
@@ -351,6 +367,10 @@ CODESTARTdbgPrintInstInfo
 		(uchar*)"(not configured)" : pData->httpheaderkey);
 	dbgprintf("\thttpheadervalue='%s'\n", pData->httpheadervalue == NULL ?
 		(uchar*)"(not configured)" : pData->httpheadervalue);
+	dbgprintf("\thttpHeaders=[");
+	for(i = 0 ; i < pData->nHttpHeaders ; ++i)
+		dbgprintf("\t%s\n",pData->httpHeaders[i]);
+	dbgprintf("\t]\n");
 	dbgprintf("\tpwd=(%sconfigured)\n", pData->pwd == NULL ? "not " : "");
 	dbgprintf("\trest path='%s'\n", pData->restPath);
 	dbgprintf("\tcheck path='%s'\n", pData->checkPath);
@@ -587,8 +607,13 @@ setPostURL(wrkrInstanceData_t *const pWrkrData, uchar **const tpls)
 			"omhttp: error allocating new estr for POST url.");
 		ABORT_FINALIZE(RS_RET_ERR);
 	}
-
-	getRestPath(pData, tpls, &restPath);
+	
+	if (pWrkrData->batch.restPath != NULL) {
+		/* get from batch if set! */
+		restPath = pWrkrData->batch.restPath;
+	} else {
+		getRestPath(pData, tpls, &restPath);
+	}
 
 	r = 0;
 	if (restPath != NULL)
@@ -1029,6 +1054,11 @@ buildCurlHeaders(wrkrInstanceData_t *pWrkrData, sbool contentEncodeGzip)
 		CHKmalloc(slist);
 	}
 
+	for (int k = 0 ; k < pWrkrData->pData->nHttpHeaders; k++) {
+		slist = curl_slist_append(slist, (char *)pWrkrData->pData->httpHeaders[k]);
+		CHKmalloc(slist);
+	}
+
 	// When sending more than 1Kb, libcurl automatically sends an Except: 100-Continue header
 	// and will wait 1s for a response, could make this configurable but for now disable
 	slist = curl_slist_append(slist, HTTP_HEADER_EXPECT_EMPTY);
@@ -1393,6 +1423,10 @@ initializeBatch(wrkrInstanceData_t *pWrkrData)
 {
 	pWrkrData->batch.sizeBytes = 0;
 	pWrkrData->batch.nmemb = 0;
+	if (pWrkrData->batch.restPath != NULL)  {
+		free(pWrkrData->batch.restPath);
+		pWrkrData->batch.restPath = NULL;
+	}
 }
 
 /* Adds a message to this worker's batch
@@ -1416,7 +1450,7 @@ finalize_it:
 }
 
 static rsRetVal
-submitBatch(wrkrInstanceData_t *pWrkrData)
+submitBatch(wrkrInstanceData_t *pWrkrData, uchar **tpls)
 {
 	DEFiRet;
 	char *batchBuf = NULL;
@@ -1441,10 +1475,10 @@ submitBatch(wrkrInstanceData_t *pWrkrData)
 	if (iRet != RS_RET_OK || batchBuf == NULL)
 		ABORT_FINALIZE(iRet);
 
-	DBGPRINTF("omhttp: submitBatch, batch: '%s'\n", batchBuf);
+	DBGPRINTF("omhttp: submitBatch, batch: '%s' tpls: '%p'\n", batchBuf, tpls);
 
 	CHKiRet(curlPost(pWrkrData, (uchar*) batchBuf, strlen(batchBuf),
-		NULL, pWrkrData->batch.nmemb));
+		tpls, pWrkrData->batch.nmemb));
 
 finalize_it:
 	if (batchBuf != NULL)
@@ -1466,17 +1500,30 @@ BEGINdoAction
 size_t nBytes;
 sbool submit;
 CODESTARTdoAction
-
+	instanceData *const pData = pWrkrData->pData;
+	uchar *restPath = NULL;
 	STATSCOUNTER_INC(ctrMessagesSubmitted, mutCtrMessagesSubmitted);
 
 	if (pWrkrData->pData->batchMode) {
+		if(pData->dynRestPath) {
+			/* Get copy of restpath in batch mode if dynRestPath enabled */
+			getRestPath(pData, ppString, &restPath);
+			if (pWrkrData->batch.restPath == NULL) {
+				pWrkrData->batch.restPath = (uchar*)strdup((char*)restPath);
+			} else if (strcmp((char*)pWrkrData->batch.restPath, (char*)restPath) != 0) {
+				/* Check if the restPath changed - if yes submit the current batch first*/
+				CHKiRet(submitBatch(pWrkrData, NULL));
+				initializeBatch(pWrkrData);
+			}
+		}
+
 		/* If the maxbatchsize is 1, then build and immediately post a batch with 1 element.
 		 * This mode will play nicely with rsyslog's action.resumeRetryCount logic.
 		 */
 		if (pWrkrData->pData->maxBatchSize == 1) {
 			initializeBatch(pWrkrData);
 			CHKiRet(buildBatch(pWrkrData, ppString[0]));
-			CHKiRet(submitBatch(pWrkrData));
+			CHKiRet(submitBatch(pWrkrData, ppString));
 			FINALIZE;
 		}
 
@@ -1498,7 +1545,7 @@ CODESTARTdoAction
 		}
 
 		if (submit) {
-			CHKiRet(submitBatch(pWrkrData));
+			CHKiRet(submitBatch(pWrkrData, ppString));
 			initializeBatch(pWrkrData);
 		}
 
@@ -1520,7 +1567,7 @@ BEGINendTransaction
 CODESTARTendTransaction
 	/* End Transaction only if batch data is not empty */
 	if (pWrkrData->batch.nmemb > 0) {
-		CHKiRet(submitBatch(pWrkrData));
+		CHKiRet(submitBatch(pWrkrData, NULL));
 	} else {
 		dbgprintf("omhttp: endTransaction, pWrkrData->batch.nmemb = 0, "
 			"nothing to send. \n");
@@ -1656,9 +1703,17 @@ curlSetup(wrkrInstanceData_t *const pWrkrData)
 	} else {
 		slist = curl_slist_append(slist, HTTP_HEADER_CONTENT_JSON);
 	}
+
 	if (pWrkrData->pData->headerBuf != NULL) {
 		slist = curl_slist_append(slist, (char *)pWrkrData->pData->headerBuf);
+		CHKmalloc(slist);
 	}
+
+	for (int k = 0 ; k < pWrkrData->pData->nHttpHeaders; k++) {
+		slist = curl_slist_append(slist, (char *)pWrkrData->pData->httpHeaders[k]);
+		CHKmalloc(slist);
+	}
+
 	// When sending more than 1Kb, libcurl automatically sends an Except: 100-Continue header
 	// and will wait 1s for a response, could make this configurable but for now disable
 	slist = curl_slist_append(slist, HTTP_HEADER_EXPECT_EMPTY);
@@ -1705,6 +1760,8 @@ setInstParamDefaults(instanceData *const pData)
 	pData->headerContentTypeBuf = NULL;
 	pData->httpheaderkey = NULL;
 	pData->httpheadervalue = NULL;
+	pData->httpHeaders = NULL;
+	pData->nHttpHeaders = 0;
 	pData->pwd = NULL;
 	pData->authBuf = NULL;
 	pData->restPath = NULL;
@@ -1733,6 +1790,20 @@ setInstParamDefaults(instanceData *const pData)
 	pData->ratelimiter = NULL;
 	pData->retryRulesetName = NULL;
 	pData->retryRuleset = NULL;
+}
+
+static rsRetVal
+checkHeaderParam(char *const param)
+{
+	DEFiRet;
+	char *val = strstr(param, ":");
+	if(val == NULL) {
+		LogError(0, RS_RET_PARAM_ERROR, "missing ':' delimiter in "
+				"parameter '%s'", param);
+		ABORT_FINALIZE(RS_RET_PARAM_ERROR);
+	}
+finalize_it:
+	RETiRet;
 }
 
 BEGINnewActInst
@@ -1772,6 +1843,14 @@ CODESTARTnewActInst
 			pData->httpheaderkey = (uchar*)es_str2cstr(pvals[i].val.d.estr, NULL);
 		} else if(!strcmp(actpblk.descr[i].name, "httpheadervalue")) {
 			pData->httpheadervalue = (uchar*)es_str2cstr(pvals[i].val.d.estr, NULL);
+		} else if(!strcmp(actpblk.descr[i].name, "httpheaders")) {
+			pData->nHttpHeaders = pvals[i].val.d.ar->nmemb;
+			CHKmalloc(pData->httpHeaders = malloc(sizeof(uchar *) * pvals[i].val.d.ar->nmemb ));
+			for(int j = 0 ; j <  pvals[i].val.d.ar->nmemb ; ++j) {
+				char *cstr = es_str2cstr(pvals[i].val.d.ar->arr[j], NULL);
+				CHKiRet(checkHeaderParam(cstr));
+				pData->httpHeaders[j] = (uchar *)cstr;
+			}
 		} else if(!strcmp(actpblk.descr[i].name, "pwd")) {
 			pData->pwd = (uchar*)es_str2cstr(pvals[i].val.d.estr, NULL);
 		} else if(!strcmp(actpblk.descr[i].name, "restpath")) {
@@ -1896,6 +1975,7 @@ CODESTARTnewActInst
 	if (pData->httpcontenttype != NULL)
 		CHKiRet(computeApiHeader((char*) "Content-Type",
 				(char*) pData->httpcontenttype, &pData->headerContentTypeBuf));
+
 	if (pData->httpheaderkey != NULL)
 		CHKiRet(computeApiHeader((char*) pData->httpheaderkey,
 				(char*) pData->httpheadervalue, &pData->headerBuf));

@@ -3,7 +3,7 @@
  *
  * Begun 2010-11-25 RGerhards
  *
- * Copyright (C) 2005-2014 by Rainer Gerhards and Adiscon GmbH
+ * Copyright (C) 2005-2020 by Rainer Gerhards and Adiscon GmbH
  *
  * This file is part of the rsyslog runtime library.
  *
@@ -123,6 +123,7 @@ typedef int rs_size_t; /* we do never need more than 2Gig strings, signed permit
 typedef rsRetVal (*prsf_t)(struct vmstk_s*, int);	/* pointer to a RainerScript function */
 typedef uint64 qDeqID;	/* queue Dequeue order ID. 32 bits is considered dangerously few */
 
+typedef struct tcpLstnParams_s tcpLstnParams_t;
 typedef struct tcpLstnPortList_s tcpLstnPortList_t; // TODO: rename?
 typedef struct strmLstnPortList_s strmLstnPortList_t; // TODO: rename?
 typedef struct actWrkrIParams actWrkrIParams_t;
@@ -235,8 +236,9 @@ typedef uintTiny	propid_t;
 #define PROP_SYS_HHOUR_UTC		167
 #define PROP_SYS_QHOUR_UTC		168
 #define PROP_SYS_MINUTE_UTC		169
-#define PROP_SYS_WDAY      170
-#define PROP_SYS_WDAY_UTC     171
+#define PROP_SYS_WDAY			170
+#define PROP_SYS_WDAY_UTC		171
+#define PROP_SYS_NOW_UXTIMESTAMP	173
 #define PROP_CEE			200
 #define PROP_CEE_ALL_JSON		201
 #define PROP_LOCAL_VAR			202
