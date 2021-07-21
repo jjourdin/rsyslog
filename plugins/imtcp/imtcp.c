@@ -276,6 +276,7 @@ static rsRetVal
 doOpenLstnSocks(tcpsrv_t *pSrv)
 {
 	ISOBJ_TYPE_assert(pSrv, tcpsrv);
+	dbgprintf("in imtcp doOpenLstnSocks\n");
 	return tcpsrv.create_tcp_socket(pSrv);
 }
 
@@ -852,6 +853,7 @@ BEGINfreeCnf
 CODESTARTfreeCnf
 	free(pModConf->pszStrmDrvrName);
 	free(pModConf->pszStrmDrvrAuthMode);
+	free(pModConf->gnutlsPriorityString);
 	free(pModConf->pszStrmDrvrPermitExpiredCerts);
 	if(pModConf->permittedPeers != NULL) {
 		cnfarrayContentDestruct(pModConf->permittedPeers);

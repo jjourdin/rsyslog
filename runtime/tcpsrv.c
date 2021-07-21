@@ -668,7 +668,7 @@ processWorksetItem(tcpsrv_t *const pThis, nspoll_t *pPoll, const int idx, void *
 finalize_it:
 	if(iRet != RS_RET_OK) {
 		LogError(0, iRet, "tcpsrv listener (inputname: '%s') failed "
-			"to processed incoming connection with error %d",
+			"to process incoming connection with error %d",
 			(cnf_params->pszInputName == NULL) ? (uchar*)"*UNSET*" : cnf_params->pszInputName, iRet);
 		srSleep(0,20000); /* Sleep 20ms */
 	}
@@ -918,6 +918,11 @@ Run(tcpsrv_t *pThis)
 	rsRetVal localRet;
 
 	ISOBJ_TYPE_assert(pThis, tcpsrv);
+
+	if(pThis->iLstnCurr == 0) {
+		dbgprintf("tcpsrv: no listeneres at all (probably init error), terminating\n");
+		RETiRet; /* somewhat "dirty" exit to avoid issue with cancel handler */
+	}
 
 	/* check if we need to start the worker pool. Once it is running, all is
 	 * well. Shutdown is done on modExit.
