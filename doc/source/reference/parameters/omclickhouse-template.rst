@@ -28,11 +28,16 @@ This parameter applies to :doc:`/configuration/modules/omclickhouse`.
 
 Description
 -----------
-This is the message format that will be sent to ClickHouse. The resulting
-string needs to be a valid INSERT Query, otherwise ClickHouse will return an
-error. Custom INSERT templates must enable the template-level SQL escaping
-option, for example ``option.stdsql="on"`` in RainerScript. ``stdSQL`` is not
-an ``omclickhouse`` action parameter. Defaults to:
+This is the message format that will be sent to ClickHouse. With the default
+``format="values"``, the rendered string must be an INSERT statement.
+Custom INSERT templates must enable the template-level SQL escaping option,
+for example ``option.stdsql="on"`` in RainerScript. ``stdSQL`` is not an
+``omclickhouse`` action parameter.
+
+With ``format="jsoneachrow"``, the template renders one JSON object per
+event and must not set ``option.stdsql``, ``option.sql``, or ``option.json``.
+The module puts the INSERT in the request URL. Property options such as
+``:::json`` still escape individual fields. Defaults to:
 
 .. note::
 

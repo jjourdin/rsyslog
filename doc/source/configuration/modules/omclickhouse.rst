@@ -46,12 +46,24 @@ Action Parameters
      - .. include:: ../../reference/parameters/omclickhouse-allowunsignedcerts.rst
         :start-after: .. summary-start
         :end-before: .. summary-end
+   * - :ref:`param-omclickhouse-asyncinsert`
+     - .. include:: ../../reference/parameters/omclickhouse-asyncinsert.rst
+        :start-after: .. summary-start
+        :end-before: .. summary-end
    * - :ref:`param-omclickhouse-bulkmode`
      - .. include:: ../../reference/parameters/omclickhouse-bulkmode.rst
         :start-after: .. summary-start
         :end-before: .. summary-end
+   * - :ref:`param-omclickhouse-compression`
+     - .. include:: ../../reference/parameters/omclickhouse-compression.rst
+        :start-after: .. summary-start
+        :end-before: .. summary-end
    * - :ref:`param-omclickhouse-errorfile`
      - .. include:: ../../reference/parameters/omclickhouse-errorfile.rst
+        :start-after: .. summary-start
+        :end-before: .. summary-end
+   * - :ref:`param-omclickhouse-format`
+     - .. include:: ../../reference/parameters/omclickhouse-format.rst
         :start-after: .. summary-start
         :end-before: .. summary-end
    * - :ref:`param-omclickhouse-healthchecktimeout`
@@ -78,6 +90,10 @@ Action Parameters
      - .. include:: ../../reference/parameters/omclickhouse-skipverifyhost.rst
         :start-after: .. summary-start
         :end-before: .. summary-end
+   * - :ref:`param-omclickhouse-table`
+     - .. include:: ../../reference/parameters/omclickhouse-table.rst
+        :start-after: .. summary-start
+        :end-before: .. summary-end
    * - :ref:`param-omclickhouse-template`
      - .. include:: ../../reference/parameters/omclickhouse-template.rst
         :start-after: .. summary-start
@@ -99,14 +115,18 @@ Action Parameters
    :hidden:
 
    ../../reference/parameters/omclickhouse-allowunsignedcerts
+   ../../reference/parameters/omclickhouse-asyncinsert
    ../../reference/parameters/omclickhouse-bulkmode
+   ../../reference/parameters/omclickhouse-compression
    ../../reference/parameters/omclickhouse-errorfile
+   ../../reference/parameters/omclickhouse-format
    ../../reference/parameters/omclickhouse-healthchecktimeout
    ../../reference/parameters/omclickhouse-maxbytes
    ../../reference/parameters/omclickhouse-port
    ../../reference/parameters/omclickhouse-pwd
    ../../reference/parameters/omclickhouse-server
    ../../reference/parameters/omclickhouse-skipverifyhost
+   ../../reference/parameters/omclickhouse-table
    ../../reference/parameters/omclickhouse-template
    ../../reference/parameters/omclickhouse-timeout
    ../../reference/parameters/omclickhouse-usehttps
@@ -190,5 +210,29 @@ If an error occurs it will be written in the error file.
 
    module(load="omclickhouse")
    action(type="omclickhouse" maxBytes="10mb" errorFile="clickhouse-error.log")
+
+
+Example 4
+---------
+
+This example posts enriched events as JSONEachRow. The template is one JSON
+object and does not enable SQL escaping. ``asyncInsert`` and gzip apply only
+because they are set here. A ClickHouse error suspends the action until the
+queue retries the batch.
+
+.. code-block:: none
+
+   module(load="omclickhouse")
+   template(name="ClickHouseJson" type="string"
+            string="{\"message\":\"%msg:::json%\",\"host\":\"%hostname:::json%\"}")
+   action(type="omclickhouse"
+          server="127.0.0.1"
+          useHttps="off"
+          format="jsoneachrow"
+          table="rsyslog.events"
+          template="ClickHouseJson"
+          asyncInsert="on"
+          compression="gzip"
+          errorFile="/var/log/clickhouse-error.json")
 
 

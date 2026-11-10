@@ -1,6 +1,16 @@
 --------------------------------------------------------------------------------------
 Scheduled Release 8.2612.0 (aka 2026.12) 2026-12-20
 
+- 2026-11-10: omclickhouse: JSONEachRow inserts, suspend on ClickHouse errors
+  format="jsoneachrow" posts newline-delimited JSON. The INSERT query is
+  sent in the URL, and the table name is limited to letters, digits,
+  underscore, and one optional database dot. asyncinsert and
+  compression="gzip" are optional and off by default. The VALUES insert
+  path is unchanged. An HTTP or ClickHouse error now suspends the action
+  instead of acknowledging the batch. The error file records the URL,
+  status, and reply without the event body, and is created mode 0600.
+  Debug output redacts the password.
+
 --------------------------------------------------------------------------------------
 Scheduled Release 8.2610.0 (aka 2026.10) 2026-10-20
 

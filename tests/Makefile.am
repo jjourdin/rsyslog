@@ -1256,7 +1256,6 @@ TESTS_MMANON = \
 
 TESTS_CLICKHOUSE = \
 	clickhouse-template-option-stdsql.sh \
-	clickhouse-http-status-error.sh \
 	clickhouse-start.sh \
 	clickhouse-basic.sh \
 	clickhouse-dflt-tpl.sh \
@@ -1277,6 +1276,14 @@ TESTS_CLICKHOUSE_VALGRIND = \
 	clickhouse-load-vg.sh \
 	clickhouse-bulk-vg.sh \
 	clickhouse-bulk-load-vg.sh
+
+# HTTP stub tests. They do not need a live ClickHouse server. Run them
+# whenever the module itself is built.
+TESTS_CLICKHOUSE_HTTP = \
+	clickhouse-http-status-error.sh \
+	clickhouse-jsoneachrow.sh
+
+CLICKHOUSE_HTTP_STUB = clickhouse_http_stub.py
 
 TESTS_LIBFAKETIME = \
 	action-retry-clock-jump.sh \
@@ -2749,6 +2756,8 @@ EXTRA_DIST += $(TESTS_MAIL_MMJSONPARSE)
 EXTRA_DIST += $(TESTS_MMANON)
 EXTRA_DIST += $(TESTS_CLICKHOUSE)
 EXTRA_DIST += $(TESTS_CLICKHOUSE_VALGRIND)
+EXTRA_DIST += $(TESTS_CLICKHOUSE_HTTP)
+EXTRA_DIST += $(CLICKHOUSE_HTTP_STUB)
 EXTRA_DIST += $(TESTS_LIBFAKETIME)
 EXTRA_DIST += $(TESTS_MMNORMALIZE_FAKETIME)
 EXTRA_DIST += $(TESTS_PGSQL)
@@ -3657,6 +3666,10 @@ TESTS += $(TESTS_MMANON)
 endif # if ENABLE_MMANON
 
 
+
+if ENABLE_CLICKHOUSE
+TESTS += $(TESTS_CLICKHOUSE_HTTP)
+endif
 
 if ENABLE_CLICKHOUSE_TESTS
 TESTS += $(TESTS_CLICKHOUSE)

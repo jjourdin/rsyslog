@@ -14,8 +14,7 @@ errorFile
 
 .. summary-start
 
-Specifies a file that receives bulk-mode failures along with the ClickHouse
-error response.
+Records the URL, HTTP status, and ClickHouse reply for a failed insert.
 
 .. summary-end
 
@@ -30,22 +29,19 @@ This parameter applies to :doc:`/configuration/modules/omclickhouse`.
 
 Description
 -----------
-If specified, records failed in bulk mode are written to this file, including
-their error cause. Rsyslog itself does not process the file any more, but the
-idea behind that mechanism is that the user can create a script to
-periodically inspect the error file and react appropriately. As the complete
-request is included, it is possible to simply resubmit messages from that
-script.
+If specified, each failed insert appends one JSON object. The object contains
+the request URL, the HTTP status, and the ClickHouse reply. It does not
+contain the event body. The file is created mode 0600.
+
+The action suspends after the failure. The queue keeps the batch and retries
+it. This file is a diagnostic. It is not a spool of events to replay.
 
 .. note::
-   When rsyslog has problems connecting to ClickHouse, a general error is
-   assumed. However, if we receive negative responses during batch
-   processing, we assume an error in the data itself (like a mandatory field
-   is not filled in, a format error or something along those lines). Such
-   errors cannot be solved by simply resubmitting the record. As such, they
-   are written to the error file so that the user (script) can examine them
-   and act appropriately. Note that e.g. after search index reconfiguration
-   (e.g. dropping the mandatory attribute) a resubmit may be successful.
+   A transport failure and a ClickHouse reject (HTTP status 400 or a reply
+   that contains ``DB::Exception``, ``DB::NetException``, or
+   ``DB::ParsingException``) both suspend the action. A single rejected row
+   holds the batch until a later attempt succeeds or the queue discard
+   policy drops it. There is no per-row skip.
 
 Input usage
 -----------

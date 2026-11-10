@@ -37,10 +37,13 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <limits.h>
+#include <strings.h>
 #if defined(__FreeBSD__)
     #include <unistd.h>
 #endif
 #include <json.h>
+#include <zlib.h>
 #include "conf.h"
 #include "syslogd-types.h"
 #include "srUtils.h"
@@ -74,6 +77,15 @@ STATSCOUNTER_DEF(indexFail, mutIndexFail)
 STATSCOUNTER_DEF(indexSuccess, mutIndexSuccess)
 
 
+/* format=values keeps the historical INSERT ... VALUES body. format=jsoneachrow
+ * puts the INSERT in the URL and posts one JSON object per line.
+ */
+#define CH_FMT_VALUES 0
+#define CH_FMT_JSONEACHROW 1
+#define CH_COMP_OFF 0
+#define CH_COMP_GZIP 1
+#define CH_TABLE_MAX 128
+
 typedef struct curl_slist HEADER;
 typedef struct instanceConf_s {
     uchar *serverBaseUrl;
@@ -94,6 +106,11 @@ typedef struct instanceConf_s {
     uchar *caCertFile;
     uchar *myCertFile;
     uchar *myPrivKeyFile;
+    int format;
+    int compression;
+    sbool asyncInsert;
+    uchar *table;
+    uchar *restQuery; /* URL suffix starting with '?'. NULL keeps the values URL. */
     struct instanceConf_s *next;
 } instanceData;
 
@@ -107,7 +124,8 @@ typedef struct wrkrInstanceData {
     PTR_ASSERT_DEF
     instanceData *pData;
     CURL *curlPostHandle; /* libcurl session handle for posting data to the server */
-    HEADER *curlHeader; /* json POST request info */
+    HEADER *curlHeader; /* headers for the plain-text health check */
+    HEADER *curlPostHeader; /* insert headers, including gzip when enabled */
     CURL *curlCheckConnHandle; /* libcurl session handle for checking the server connection */
     int replyLen;
     char *reply;
@@ -136,7 +154,11 @@ static struct cnfparamdescr actpdescr[] = {{"server", eCmdHdlrGetWord, 0},
                                            {"maxbytes", eCmdHdlrSize, 0},
                                            {"tls.cacert", eCmdHdlrString, 0},
                                            {"tls.mycert", eCmdHdlrString, 0},
-                                           {"tls.myprivkey", eCmdHdlrString, 0}};
+                                           {"tls.myprivkey", eCmdHdlrString, 0},
+                                           {"format", eCmdHdlrGetWord, 0},
+                                           {"table", eCmdHdlrString, 0},
+                                           {"asyncinsert", eCmdHdlrBinary, 0},
+                                           {"compression", eCmdHdlrGetWord, 0}};
 static struct cnfparamblk actpblk = {CNFPARAMBLK_VERSION, sizeof(actpdescr) / sizeof(struct cnfparamdescr), actpdescr};
 
 static rsRetVal curlSetup(wrkrInstanceData_t *pWrkrData);
@@ -152,6 +174,7 @@ ENDcreateInstance
 BEGINcreateWrkrInstance
     CODESTARTcreateWrkrInstance;
     pWrkrData->curlHeader = NULL;
+    pWrkrData->curlPostHeader = NULL;
     pWrkrData->curlPostHandle = NULL;
     pWrkrData->curlCheckConnHandle = NULL;
     pWrkrData->restURL = NULL;
@@ -185,6 +208,8 @@ BEGINfreeInstance
     free(pData->caCertFile);
     free(pData->myCertFile);
     free(pData->myPrivKeyFile);
+    free(pData->table);
+    free(pData->restQuery);
 ENDfreeInstance
 
 BEGINfreeWrkrInstance
@@ -192,6 +217,10 @@ BEGINfreeWrkrInstance
     if (pWrkrData->curlHeader != NULL) {
         curl_slist_free_all(pWrkrData->curlHeader);
         pWrkrData->curlHeader = NULL;
+    }
+    if (pWrkrData->curlPostHeader != NULL) {
+        curl_slist_free_all(pWrkrData->curlPostHeader);
+        pWrkrData->curlPostHeader = NULL;
     }
     if (pWrkrData->curlCheckConnHandle != NULL) {
         curl_easy_cleanup(pWrkrData->curlCheckConnHandle);
@@ -214,7 +243,7 @@ BEGINdbgPrintInstInfo
     dbgprintf("\tserver='%s'\n", pData->serverBaseUrl);
     dbgprintf("\tport='%d'\n", pData->port);
     dbgprintf("\tuser='%s'\n", pData->user);
-    dbgprintf("\tpwd='%s'\n", pData->pwd);
+    dbgprintf("\tpwd='%s'\n", (pData->pwd == NULL || pData->pwd[0] == '\0') ? "" : "[redacted]");
     dbgprintf("\thealthCheckTimeout=%lu\n", pData->healthCheckTimeout);
     dbgprintf("\ttimeout=%lu\n", pData->timeout);
     dbgprintf("\ttemplate='%s'\n", pData->tplName);
@@ -227,6 +256,10 @@ BEGINdbgPrintInstInfo
     dbgprintf("\ttls.cacert='%s'\n", pData->caCertFile);
     dbgprintf("\ttls.mycert='%s'\n", pData->myCertFile);
     dbgprintf("\ttls.myprivkey='%s'\n", pData->myPrivKeyFile);
+    dbgprintf("\tformat='%s'\n", pData->format == CH_FMT_JSONEACHROW ? "jsoneachrow" : "values");
+    dbgprintf("\ttable='%s'\n", pData->table == NULL ? "" : (char *)pData->table);
+    dbgprintf("\tasyncinsert='%d'\n", pData->asyncInsert);
+    dbgprintf("\tcompression='%s'\n", pData->compression == CH_COMP_GZIP ? "gzip" : "off");
 ENDdbgPrintInstInfo
 
 
@@ -244,7 +277,15 @@ static rsRetVal ATTR_NONNULL() checkConn(wrkrInstanceData_t *const pWrkrData) {
     curl = pWrkrData->curlCheckConnHandle;
 
 
-    curl_easy_setopt(curl, CURLOPT_URL, pWrkrData->restURL);
+    /* Health checks always post SELECT 1 to the base URL. The insert URL for
+     * JSONEachRow carries ?query=INSERT..., and ClickHouse would treat the
+     * body as rows for that query.
+     */
+    curl_easy_setopt(curl, CURLOPT_URL, pWrkrData->pData->serverBaseUrl);
+    /* The health check is a POST. Set the method explicitly so libcurl does
+     * not leave it implied by POSTFIELDS.
+     */
+    curl_easy_setopt(curl, CURLOPT_POST, 1L);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, healthCheckMessage);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)strlen(healthCheckMessage));
     curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errbuf);
@@ -255,9 +296,8 @@ static rsRetVal ATTR_NONNULL() checkConn(wrkrInstanceData_t *const pWrkrData) {
         ABORT_FINALIZE(RS_RET_OK);
     }
 
-    DBGPRINTF("omclickhouse: checkConn failed: %s\n", curl_easy_strerror(res));
-
-    LogMsg(0, RS_RET_SUSPENDED, LOG_WARNING, "omclickhouse: checkConn failed.");
+    LogMsg(0, RS_RET_SUSPENDED, LOG_WARNING, "omclickhouse: checkConn failed: %s",
+           errbuf[0] != '\0' ? errbuf : curl_easy_strerror(res));
     ABORT_FINALIZE(RS_RET_SUSPENDED);
 
 finalize_it:
@@ -275,19 +315,26 @@ ENDtryResume
 
 
 /*
- * Dumps entire bulk request and response in error log
+ * Record the failed request's URL, HTTP status, and ClickHouse reply.
+ * The event body is not written. It can carry customer data, and a suspended
+ * batch is retried by the action queue rather than replayed from this file.
  */
-static rsRetVal getDataErrorDefault(wrkrInstanceData_t *pWrkrData, const char *reply, uchar *reqmsg, char **rendered) {
+static rsRetVal getDataErrorDefault(wrkrInstanceData_t *pWrkrData,
+                                    const char *reply,
+                                    long httpStatus,
+                                    char **rendered) {
     DEFiRet;
     fjson_object *req = NULL;
     fjson_object *errRoot = NULL;
+    char statusBuf[32];
 
     if ((req = fjson_object_new_object()) == NULL) ABORT_FINALIZE(RS_RET_ERR);
     fjson_object_object_add(req, "url", fjson_object_new_string((char *)pWrkrData->restURL));
-    fjson_object_object_add(req, "postdata", fjson_object_new_string((char *)reqmsg));
 
     if ((errRoot = fjson_object_new_object()) == NULL) ABORT_FINALIZE(RS_RET_ERR);
     fjson_object_object_add(errRoot, "request", req);
+    snprintf(statusBuf, sizeof(statusBuf), "%ld", httpStatus);
+    fjson_object_object_add(errRoot, "http_status", fjson_object_new_string(statusBuf));
     fjson_object_object_add(errRoot, "reply", fjson_object_new_string(reply));
     *rendered = strdup((char *)fjson_object_to_json_string(errRoot));
     if (*rendered == NULL) {
@@ -309,7 +356,7 @@ finalize_it:
  * Note: we open the file but never close it before exit. If it
  * needs to be closed, HUP must be sent.
  */
-static rsRetVal ATTR_NONNULL() writeDataError(wrkrInstanceData_t *const pWrkrData, uchar *const reqmsg) {
+static rsRetVal ATTR_NONNULL() writeDataError(wrkrInstanceData_t *const pWrkrData, const long httpStatus) {
     DEFiRet;
     instanceData *pData = pWrkrData->pData;
     const char *const reply = pWrkrData->reply == NULL ? "" : pWrkrData->reply;
@@ -326,22 +373,21 @@ static rsRetVal ATTR_NONNULL() writeDataError(wrkrInstanceData_t *const pWrkrDat
 
 
     if (pData->fdErrFile == -1) {
-        pData->fdErrFile = open((char *)pData->errorFile, O_WRONLY | O_CREAT | O_APPEND | O_LARGEFILE | O_CLOEXEC,
-                                S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+        pData->fdErrFile =
+            open((char *)pData->errorFile, O_WRONLY | O_CREAT | O_APPEND | O_LARGEFILE | O_CLOEXEC, S_IRUSR | S_IWUSR);
         if (pData->fdErrFile == -1) {
             LogError(errno, RS_RET_ERR, "omclickhouse: error opening error file %s", pData->errorFile);
             ABORT_FINALIZE(RS_RET_ERR);
         }
     }
 
-    if (getDataErrorDefault(pWrkrData, reply, reqmsg, &rendered) != RS_RET_OK) {
+    if (getDataErrorDefault(pWrkrData, reply, httpStatus, &rendered) != RS_RET_OK) {
         ABORT_FINALIZE(RS_RET_ERR);
     }
 
     /* we do not do real error-handling on the err file, as this finally complicates
      * things way to much.
      */
-    dbgprintf("omclickhouse: message sent: '%s'\n", reqmsg);
     dbgprintf("omclickhouse: error record: '%s'\n", rendered);
     toWrite = strlen(rendered) + 1;
     /* Note: we overwrite the '\0' terminator with '\n' -- so we avoid
@@ -360,52 +406,52 @@ finalize_it:
 }
 
 
-static rsRetVal checkResult(wrkrInstanceData_t *pWrkrData, uchar *reqmsg, const long httpStatus) {
+static rsRetVal checkResult(wrkrInstanceData_t *pWrkrData, const long httpStatus) {
     const char *const reply = pWrkrData->reply == NULL ? "" : pWrkrData->reply;
     DEFiRet;
 
     if (httpStatus >= 400 || strstr(reply, " = DB::Exception") != NULL || strstr(reply, "DB::NetException") != NULL ||
         strstr(reply, "DB::ParsingException") != NULL) {
         dbgprintf("omclickhouse: action failed with HTTP status %ld and reply: %s\n", httpStatus, reply);
-        iRet = RS_RET_DATAFAIL;
-    }
-
-    if (iRet == RS_RET_DATAFAIL) {
         STATSCOUNTER_INC(indexFail, mutIndexFail);
-        LogError(0, RS_RET_DATAFAIL, "omclickhouse: ClickHouse request failed with HTTP status %ld: %s", httpStatus,
+        /* Reply only. The event body stays in the action queue until a later
+         * attempt succeeds or the queue's own discard policy drops it.
+         */
+        LogError(0, RS_RET_SUSPENDED, "omclickhouse: ClickHouse request failed with HTTP status %ld: %s", httpStatus,
                  reply);
-        writeDataError(pWrkrData, reqmsg);
-        iRet = RS_RET_OK; /* we have handled the problem! */
+        writeDataError(pWrkrData, httpStatus);
+        ABORT_FINALIZE(RS_RET_SUSPENDED);
     }
 
-
-    if (iRet != RS_RET_OK) {
-        STATSCOUNTER_INC(indexFail, mutIndexFail);
-    }
+finalize_it:
     RETiRet;
 }
 
 static rsRetVal ATTR_NONNULL(1) setPostURL(wrkrInstanceData_t *const pWrkrData) {
-    char *baseUrl;
-    es_str_t *url;
+    const char *base;
+    const char *query;
+    size_t blen;
+    size_t qlen;
     DEFiRet;
-    instanceData *const pData = pWrkrData->pData;
 
-    baseUrl = (char *)pData->serverBaseUrl;
-    url = es_newStrFromCStr(baseUrl, strlen(baseUrl));
-    if (url == NULL) {
-        LogError(0, RS_RET_OUT_OF_MEMORY, "omclickhouse: error allocating new estr for POST url.");
+    base = (const char *)pWrkrData->pData->serverBaseUrl;
+    query = (const char *)pWrkrData->pData->restQuery;
+    if (base == NULL) {
+        LogError(0, RS_RET_ERR, "omclickhouse: server URL is not set");
         ABORT_FINALIZE(RS_RET_ERR);
     }
+    blen = strlen(base);
+    qlen = query == NULL ? 0 : strlen(query);
 
     if (pWrkrData->restURL != NULL) free(pWrkrData->restURL);
-
-    pWrkrData->restURL = (uchar *)es_str2cstr(url, NULL);
+    CHKmalloc(pWrkrData->restURL = (uchar *)malloc(blen + qlen + 1));
+    memcpy(pWrkrData->restURL, base, blen);
+    if (qlen > 0) memcpy((char *)pWrkrData->restURL + blen, query, qlen);
+    pWrkrData->restURL[blen + qlen] = '\0';
     curl_easy_setopt(pWrkrData->curlPostHandle, CURLOPT_URL, pWrkrData->restURL);
     dbgprintf("omclickhouse: using REST URL: '%s'\n", pWrkrData->restURL);
 
 finalize_it:
-    if (url != NULL) es_deleteStr(url);
     RETiRet;
 }
 
@@ -419,6 +465,13 @@ static size_t computeBulkMessage(const wrkrInstanceData_t *const pWrkrData,
                                  const char **newMessage) {
     size_t r = 0;
     const char *v;
+    /* JSONEachRow is one object per message. Do not cut the line at VALUES. */
+    if (pWrkrData->pData->format == CH_FMT_JSONEACHROW) {
+        *newMessage = (const char *)message;
+        r = strlen(*newMessage);
+        if (r == 0 || (*newMessage)[r - 1] != '\n') ++r;
+        return r;
+    }
     if (pWrkrData->batch.nmemb != 0 && (v = strstr((const char *)message, "VALUES")) != NULL &&
         (v = strchr(v, '(')) != NULL) {
         *newMessage = v;
@@ -440,7 +493,10 @@ static rsRetVal buildBatch(wrkrInstanceData_t *pWrkrData, const char *message) {
     int length = strlen(message);
     int r;
 
-    r = es_addBuf(&pWrkrData->batch.data, message, length);
+    r = es_addBuf(&pWrkrData->batch.data, (char *)message, length);
+    if (r == 0 && pWrkrData->pData->format == CH_FMT_JSONEACHROW && (length == 0 || message[length - 1] != '\n')) {
+        r = es_addChar(&pWrkrData->batch.data, '\n');
+    }
     if (r != 0) {
         LogError(0, RS_RET_ERR, "omclickhouse: growing batch failed with code %d", r);
         ABORT_FINALIZE(RS_RET_ERR);
@@ -459,20 +515,70 @@ static void ATTR_NONNULL() initializeBatch(wrkrInstanceData_t *pWrkrData) {
 }
 
 
+/* ClickHouse Content-Encoding: gzip is a gzip wrapper. compress2() emits a
+ * zlib wrapper, which ClickHouse rejects, so this uses windowBits 15+16.
+ */
+static rsRetVal gzipBody(const uchar *src, int srcLen, uchar **out, int *outLen) {
+    z_stream strm;
+    Bytef *dest = NULL;
+    uLong cap;
+    int z;
+    DEFiRet;
+
+    *out = NULL;
+    *outLen = 0;
+    if (srcLen < 0) ABORT_FINALIZE(RS_RET_ERR);
+    cap = compressBound((uLong)srcLen) + 32;
+    if (cap > UINT_MAX) ABORT_FINALIZE(RS_RET_ERR);
+    dest = malloc(cap);
+    if (dest == NULL) ABORT_FINALIZE(RS_RET_OUT_OF_MEMORY);
+
+    memset(&strm, 0, sizeof(strm));
+    strm.next_in = (Bytef *)src;
+    strm.avail_in = (uInt)srcLen;
+    strm.next_out = dest;
+    strm.avail_out = (uInt)cap;
+    z = deflateInit2(&strm, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 15 + 16, 8, Z_DEFAULT_STRATEGY);
+    if (z != Z_OK) {
+        LogError(0, RS_RET_ERR, "omclickhouse: gzip init failed with %d", z);
+        ABORT_FINALIZE(RS_RET_SUSPENDED);
+    }
+    z = deflate(&strm, Z_FINISH);
+    if (z != Z_STREAM_END) {
+        deflateEnd(&strm);
+        LogError(0, RS_RET_ERR, "omclickhouse: gzip deflate failed with %d", z);
+        ABORT_FINALIZE(RS_RET_SUSPENDED);
+    }
+    if (strm.total_out > INT_MAX) {
+        deflateEnd(&strm);
+        ABORT_FINALIZE(RS_RET_ERR);
+    }
+    *outLen = (int)strm.total_out;
+    *out = (uchar *)dest;
+    dest = NULL;
+    deflateEnd(&strm);
+
+finalize_it:
+    free(dest);
+    RETiRet;
+}
+
+
 static rsRetVal ATTR_NONNULL(1, 2)
     curlPost(wrkrInstanceData_t *pWrkrData, uchar *message, int msglen, const int nmsgs) {
     CURLcode code;
     CURL *const curl = pWrkrData->curlPostHandle;
     char errbuf[CURL_ERROR_SIZE] = "";
     long httpStatus = 0;
+    uchar *gzipped = NULL;
+    uchar *payload = message;
+    int payloadLen = msglen;
     DEFiRet;
 
-    if (!strstr((char *)message, "INSERT INTO") && !pWrkrData->insertErrorSent) {
+    if (pWrkrData->pData->format != CH_FMT_JSONEACHROW && !strstr((char *)message, "INSERT INTO") &&
+        !pWrkrData->insertErrorSent) {
         indexHTTPFail += nmsgs;
-        LogError(0, RS_RET_ERR,
-                 "omclickhouse: Message is no Insert query: "
-                 "Message suspended: %s",
-                 (char *)message);
+        LogError(0, RS_RET_ERR, "omclickhouse: message is not an INSERT query");
         pWrkrData->insertErrorSent = 1;
         ABORT_FINALIZE(RS_RET_ERR);
     }
@@ -482,8 +588,13 @@ static rsRetVal ATTR_NONNULL(1, 2)
 
     CHKiRet(setPostURL(pWrkrData));
 
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, (char *)message);
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)msglen);
+    if (pWrkrData->pData->compression == CH_COMP_GZIP) {
+        CHKiRet(gzipBody(message, msglen, &gzipped, &payloadLen));
+        payload = gzipped;
+    }
+
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, (char *)payload);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)payloadLen);
     curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errbuf);
     code = curl_easy_perform(curl);
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpStatus);
@@ -508,10 +619,11 @@ static rsRetVal ATTR_NONNULL(1, 2)
             /* Append 0 Byte if replyLen is above 0 - byte has been reserved in malloc */
         }
         dbgprintf("omclickhouse: pWrkrData reply: '%s'\n", pWrkrData->reply == NULL ? "" : pWrkrData->reply);
-        CHKiRet(checkResult(pWrkrData, message, httpStatus));
+        CHKiRet(checkResult(pWrkrData, httpStatus));
     }
 
 finalize_it:
+    free(gzipped);
     free(pWrkrData->reply);
     pWrkrData->reply = NULL; /* don't leave dangling pointer */
     RETiRet;
@@ -607,6 +719,11 @@ static void ATTR_NONNULL() setInstParamDefaults(instanceData *const pData) {
     pData->caCertFile = NULL;
     pData->myCertFile = NULL;
     pData->myPrivKeyFile = NULL;
+    pData->format = CH_FMT_VALUES;
+    pData->compression = CH_COMP_OFF;
+    pData->asyncInsert = 0;
+    pData->table = NULL;
+    pData->restQuery = NULL;
 }
 
 /* POST result string ... useful for debugging */
@@ -660,6 +777,12 @@ static void ATTR_NONNULL() curlCheckConnSetup(wrkrInstanceData_t *const pWrkrDat
 
 static void ATTR_NONNULL(1) curlPostSetup(wrkrInstanceData_t *const pWrkrData) {
     curlSetupCommon(pWrkrData, pWrkrData->curlPostHandle);
+    /* The health check posts plain "SELECT 1". Gzip applies to inserts only,
+     * so the post handle gets its own header list when compression is on.
+     */
+    if (pWrkrData->curlPostHeader != NULL) {
+        curl_easy_setopt(pWrkrData->curlPostHandle, CURLOPT_HTTPHEADER, pWrkrData->curlPostHeader);
+    }
     curl_easy_setopt(pWrkrData->curlPostHandle, CURLOPT_POST, 1L);
     if (pWrkrData->pData->timeout) {
         curl_easy_setopt(pWrkrData->curlPostHandle, CURLOPT_TIMEOUT_MS, pWrkrData->pData->timeout);
@@ -667,10 +790,26 @@ static void ATTR_NONNULL(1) curlPostSetup(wrkrInstanceData_t *const pWrkrData) {
 }
 
 #define CONTENT_JSON "Content-Type: application/json; charset=utf-8"
+#define CONTENT_NDJSON "Content-Type: application/x-ndjson"
+#define CONTENT_GZIP "Content-Encoding: gzip"
 
 static rsRetVal ATTR_NONNULL() curlSetup(wrkrInstanceData_t *const pWrkrData) {
+    const char *ctype;
     DEFiRet;
-    pWrkrData->curlHeader = curl_slist_append(NULL, CONTENT_JSON);
+    ctype = pWrkrData->pData->format == CH_FMT_JSONEACHROW ? CONTENT_NDJSON : CONTENT_JSON;
+    pWrkrData->curlHeader = curl_slist_append(NULL, ctype);
+    CHKmalloc(pWrkrData->curlHeader);
+    if (pWrkrData->pData->compression == CH_COMP_GZIP) {
+        HEADER *postHdr = curl_slist_append(NULL, ctype);
+        HEADER *gzipHdr;
+        if (postHdr == NULL) ABORT_FINALIZE(RS_RET_OUT_OF_MEMORY);
+        gzipHdr = curl_slist_append(postHdr, CONTENT_GZIP);
+        if (gzipHdr == NULL) {
+            curl_slist_free_all(postHdr);
+            ABORT_FINALIZE(RS_RET_OUT_OF_MEMORY);
+        }
+        pWrkrData->curlPostHeader = gzipHdr;
+    }
     CHKmalloc(pWrkrData->curlPostHandle = curl_easy_init());
     curlPostSetup(pWrkrData);
 
@@ -681,6 +820,14 @@ finalize_it:
     if (iRet != RS_RET_OK && pWrkrData->curlPostHandle != NULL) {
         curl_easy_cleanup(pWrkrData->curlPostHandle);
         pWrkrData->curlPostHandle = NULL;
+    }
+    if (iRet != RS_RET_OK && pWrkrData->curlHeader != NULL) {
+        curl_slist_free_all(pWrkrData->curlHeader);
+        pWrkrData->curlHeader = NULL;
+    }
+    if (iRet != RS_RET_OK && pWrkrData->curlPostHeader != NULL) {
+        curl_slist_free_all(pWrkrData->curlPostHeader);
+        pWrkrData->curlPostHeader = NULL;
     }
     RETiRet;
 }
@@ -764,6 +911,101 @@ finalize_it:
     RETiRet;
 }
 
+/* database.table or table. One dot, no empty side, nothing else. The value is
+ * copied into the request URL, so this is the injection boundary.
+ */
+static int tableNameOk(const char *table) {
+    size_t i;
+    size_t n;
+    const char *dot;
+
+    if (table == NULL) return 0;
+    n = strlen(table);
+    if (n == 0 || n > CH_TABLE_MAX) return 0;
+    if (table[0] == '.' || table[n - 1] == '.') return 0;
+    dot = strchr(table, '.');
+    if (dot != NULL && strchr(dot + 1, '.') != NULL) return 0;
+    for (i = 0; i < n; ++i) {
+        unsigned char c = (unsigned char)table[i];
+        if (c == '.' || c == '_' || (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'))
+            continue;
+        return 0;
+    }
+    return 1;
+}
+
+static rsRetVal rejectEscapedJsonTemplate(instanceData *const pData) {
+    struct template *tpl;
+    DEFiRet;
+
+    if (loadModConf == NULL || loadModConf->pConf == NULL || pData->tplName == NULL) FINALIZE;
+    tpl = tplFind(loadModConf->pConf, (char *)pData->tplName, (int)strlen((char *)pData->tplName));
+    if (tpl != NULL && tpl->optFormatEscape != 0) {
+        LogError(0, RS_RET_CONFIG_ERROR,
+                 "omclickhouse: format jsoneachrow does not accept template '%s' "
+                 "with option.stdsql, option.sql, or option.json",
+                 pData->tplName);
+        ABORT_FINALIZE(RS_RET_CONFIG_ERROR);
+    }
+finalize_it:
+    RETiRet;
+}
+
+static rsRetVal appendQuery(char *dst, size_t cap, size_t *off, const char *src) {
+    size_t n = strlen(src);
+    if (*off + n >= cap) return RS_RET_ERR;
+    memcpy(dst + *off, src, n);
+    *off += n;
+    dst[*off] = '\0';
+    return RS_RET_OK;
+}
+
+static rsRetVal buildRestQuery(instanceData *const pData) {
+    char query[1024];
+    size_t off = 0;
+    DEFiRet;
+
+    query[0] = '\0';
+    if (pData->format == CH_FMT_JSONEACHROW) {
+        char sql[CH_TABLE_MAX + 64];
+        const char *s;
+        int n = snprintf(sql, sizeof(sql), "INSERT INTO %s FORMAT JSONEachRow", (const char *)pData->table);
+        if (n < 0 || (size_t)n >= sizeof(sql)) {
+            LogError(0, RS_RET_ERR, "omclickhouse: internal query buffer too small");
+            ABORT_FINALIZE(RS_RET_ERR);
+        }
+        CHKiRet(appendQuery(query, sizeof(query), &off, "?query="));
+        for (s = sql; *s != '\0'; ++s) {
+            /* CHKiRet expands to an if. Brace it so the else stays attached here. */
+            if (*s == ' ') {
+                CHKiRet(appendQuery(query, sizeof(query), &off, "%20"));
+            } else {
+                char one[2];
+                one[0] = *s;
+                one[1] = '\0';
+                CHKiRet(appendQuery(query, sizeof(query), &off, one));
+            }
+        }
+    }
+    if (pData->asyncInsert) {
+        CHKiRet(appendQuery(
+            query, sizeof(query), &off,
+            off == 0 ? "?async_insert=1&wait_for_async_insert=1" : "&async_insert=1&wait_for_async_insert=1"));
+    }
+    if (pData->compression == CH_COMP_GZIP) {
+        CHKiRet(appendQuery(query, sizeof(query), &off,
+                            off == 0 ? "?enable_http_compression=1" : "&enable_http_compression=1"));
+    }
+    if (off > 0) CHKmalloc(pData->restQuery = (uchar *)strdup(query));
+
+finalize_it:
+    if (iRet != RS_RET_OK) {
+        free(pData->restQuery);
+        pData->restQuery = NULL;
+    }
+    RETiRet;
+}
+
 BEGINnewActInst
     struct cnfparamvals *pvals;
     uchar *server = NULL;
@@ -828,6 +1070,36 @@ BEGINnewActInst
             } else {
                 fclose(fp);
             }
+        } else if (!strcmp(actpblk.descr[i].name, "format")) {
+            char *fmt = NULL;
+            CHKmalloc(fmt = es_str2cstr(pvals[i].val.d.estr, NULL));
+            if (!strcasecmp(fmt, "values")) {
+                pData->format = CH_FMT_VALUES;
+            } else if (!strcasecmp(fmt, "jsoneachrow")) {
+                pData->format = CH_FMT_JSONEACHROW;
+            } else {
+                LogError(0, RS_RET_CONFIG_ERROR, "omclickhouse: format must be values or jsoneachrow");
+                free(fmt);
+                ABORT_FINALIZE(RS_RET_CONFIG_ERROR);
+            }
+            free(fmt);
+        } else if (!strcmp(actpblk.descr[i].name, "table")) {
+            CHKmalloc(pData->table = (uchar *)es_str2cstr(pvals[i].val.d.estr, NULL));
+        } else if (!strcmp(actpblk.descr[i].name, "asyncinsert")) {
+            pData->asyncInsert = pvals[i].val.d.n;
+        } else if (!strcmp(actpblk.descr[i].name, "compression")) {
+            char *comp = NULL;
+            CHKmalloc(comp = es_str2cstr(pvals[i].val.d.estr, NULL));
+            if (!strcasecmp(comp, "off")) {
+                pData->compression = CH_COMP_OFF;
+            } else if (!strcasecmp(comp, "gzip")) {
+                pData->compression = CH_COMP_GZIP;
+            } else {
+                LogError(0, RS_RET_CONFIG_ERROR, "omclickhouse: compression must be off or gzip");
+                free(comp);
+                ABORT_FINALIZE(RS_RET_CONFIG_ERROR);
+            }
+            free(comp);
         } else if (!strcmp(actpblk.descr[i].name, "tls.myprivkey")) {
             CHKmalloc(pData->myPrivKeyFile = (uchar *)es_str2cstr(pvals[i].val.d.estr, NULL));
             fp = fopen((const char *)pData->myPrivKeyFile, "r");
@@ -856,10 +1128,31 @@ BEGINnewActInst
 
     if (pData->user != NULL) CHKiRet(computeAuthHeader((char *)pData->user, (char *)pData->pwd, &pData->authBuf));
 
+    if (pData->format == CH_FMT_JSONEACHROW) {
+        if (pData->tplName == NULL) {
+            LogError(0, RS_RET_CONFIG_ERROR, "omclickhouse: format jsoneachrow requires a template");
+            ABORT_FINALIZE(RS_RET_CONFIG_ERROR);
+        }
+        if (!tableNameOk((const char *)pData->table)) {
+            LogError(0, RS_RET_CONFIG_ERROR,
+                     "omclickhouse: table must be table or database.table and contain only "
+                     "[A-Za-z0-9_.]");
+            ABORT_FINALIZE(RS_RET_CONFIG_ERROR);
+        }
+        CHKiRet(rejectEscapedJsonTemplate(pData));
+    } else if (pData->table != NULL) {
+        LogError(0, RS_RET_CONFIG_ERROR, "omclickhouse: table is only valid with format jsoneachrow");
+        ABORT_FINALIZE(RS_RET_CONFIG_ERROR);
+    }
+    CHKiRet(buildRestQuery(pData));
+
     CODE_STD_STRING_REQUESTnewActInst(1);
+    /* JSONEachRow must not ask the core for SQL escaping. option.stdsql would
+     * rewrite quotes inside the JSON object.
+     */
     CHKiRet(OMSRsetEntry(*ppOMSR, 0,
                          (uchar *)strdup((pData->tplName == NULL) ? " StdClickHouseFmt" : (char *)pData->tplName),
-                         OMSR_RQD_TPL_OPT_SQL));
+                         (pData->format == CH_FMT_JSONEACHROW) ? OMSR_NO_RQD_TPL_OPTS : OMSR_RQD_TPL_OPT_SQL));
 
     if (server != NULL) {
         CHKiRet(computeBaseUrl((const char *)server, pData->port, pData->useHttps, pData));
